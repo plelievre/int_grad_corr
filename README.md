@@ -7,7 +7,11 @@ Chien-Chung Chen\*
 
 \*National Taiwan University, Department of Psychology
 
-| <img src=assets/int_grad_corr.png /> |
+| <img src=assets/igc_fmri.jpg /> |
+|:--:|
+| *IGC maps associated with the prediction of image mean luminance from fMRI data.* |
+
+| <img src=assets/igc_mnist.png /> |
 |:--:|
 | *IGC maps of the MNIST dataset w.r.t. all possible digit classes.* |
 
