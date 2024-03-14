@@ -1,11 +1,9 @@
 # Integrated Gradient Correlation
 [arXiv](https://plelievre.com) | [BibTeX](#bibtex)
 
-[Integrated Gradient Correlation: a Dataset-wise Attribution Method](https://plelievre.com)<br/>
-[Pierre Lelièvre](https://plelievre.com)\*,
-Chien-Chung Chen\*
-
-\*National Taiwan University, Department of Psychology
+[**Integrated Gradient Correlation: a Dataset-wise Attribution Method**](https://plelievre.com)<br/>
+[Pierre Lelièvre](https://plelievre.com)\*, Chien-Chung Chen\*<br>
+<span style="font-size:0.8em;">\*National Taiwan University, Department of Psychology</span>
 
 | <img src=assets/igc_fmri.jpg /> |
 |:--:|
