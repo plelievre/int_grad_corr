@@ -1,0 +1,16 @@
+name: int_grad_corr
+channels:
+    - pytorch
+    - defaults
+dependencies:
+    - python=3.10
+    - jupyter
+    # Sciences
+    - numpy
+    - scipy
+    - matplotlib
+    # Neural Networks
+    - pytorch::pytorch=2.1
+    - tensorboard
+    # Others
+    - tqdm

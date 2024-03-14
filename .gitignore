@@ -1,0 +1,22 @@
+# Conda
+.conda/
+
+# Python
+*.pyc
+*.ipynb
+
+# Data
+**/data/
+**/logs/
+**/saves/
+**/results/
+**/logs_archive/
+**/saves_archive/
+**/results_archive/
+
+# MacOS
+*.DS_Store
+
+# VSCode
+.vscode/
+*.code-workspace
