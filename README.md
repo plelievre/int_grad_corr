@@ -3,7 +3,7 @@
 
 [**Integrated Gradient Correlation: a Dataset-wise Attribution Method**](https://plelievre.com)<br/>
 [Pierre Lelièvre](https://plelievre.com)\*, Chien-Chung Chen\*<br>
-<sub><sup>\*National Taiwan University, Department of Psychology<sub><sup>
+<sub><sup>\*Department of Psychology, National Taiwan University<sub><sup>
 
 | <img src=assets/igc_fmri.jpg /> |
 |:--:|
