@@ -9,7 +9,7 @@
 |:--:|
 | *IGC maps associated with the prediction of image mean luminance from fMRI data.* |
 
-| <img src=assets/igc_mnist.png /> |
+| <img src=assets/igc_mnist.jpg /> |
 |:--:|
 | *IGC maps of the MNIST dataset w.r.t. all possible digit classes.* |
 
