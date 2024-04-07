@@ -98,20 +98,20 @@ def mnist_img(x, contour_m=None, contour_p=None):
     return fig
 
 
-def mnist_img_10(x, contour_m=None, digit=None):
+def mnist_img_10(x, contour_m=None, digits=None):
     fig, axs = plt.subplots(
         10, 10, figsize=(2.7, 3.0), dpi=300, gridspec_kw = {
             'top': 0.9, 'bottom': 0.1, 'left': 0.1/0.9, 'right': 1.0,
             'wspace': 0.0, 'hspace': 0.0})
     if contour_m is not None:
         xx, yy = np.meshgrid(np.arange(28), np.arange(28))
-    if digit is None:
+    if digits is None:
         digits = np.arange(10)
-    else:
-        digits = (digit,) * 10
-    for j in range(10):
+    elif isinstance(digits, int):
+        digits = (digits,) * 10
+    for j in range(10):  # sample idx
         v_max = np.max(np.abs(x[j]))
-        for i in range(10):
+        for i in range(10):  # y idx
             ax = axs[j][i]
             ax.axis('off')
             ax.imshow(x[j, i], cmap='RdBu_r', vmin=-v_max, vmax=v_max)
