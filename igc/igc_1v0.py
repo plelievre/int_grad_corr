@@ -76,71 +76,109 @@ from scipy.stats import pearsonr
 # Utils
 
 
-def _iter_y_idx(y_size, y_idx):
-    if y_idx is None:
-        y_idx = range(y_size)
-    elif isinstance(y_idx, int):
-        y_size = 1
-        y_idx = (y_idx,)
-    else:
-        y_idx = np.array(y_idx, dtype=np.int64).tolist()
-        y_size = len(y_idx)
-    return y_size, y_idx
-
-
 @torch.no_grad()
-def _prepare_y_idx(y_size, y_idx, device='cpu'):
+def _prepare_y_idx(y_idx, y_size, device, x_batch_size=None):
+    # All components
     if y_idx is None:
+        assert y_size is not None, 'y_size must be defined if y_idx is None.'
+        n_y_idx = y_size
         y_idx = torch.arange(y_size, dtype=torch.int64, device=device)
+    # One specific component
     elif isinstance(y_idx, int):
-        y_size = 1
-        y_idx = torch.full((y_size,), y_idx, dtype=torch.int64, device=device)
+        n_y_idx = 1
+        y_idx = torch.full((1,), y_idx, dtype=torch.int64, device=device)
+    # Multiple components
     else:
-        y_idx = torch.tensor(y_idx, dtype=torch.int64, device=device)
-        y_size = y_idx.size(0)
-    return y_size, y_idx
+        y_idx = torch.as_tensor(y_idx, dtype=torch.int64, device=device)
+        n_y_idx = list(y_idx.size())
+        if n_y_idx:
+            n_y_idx = n_y_idx[0]
+        else:
+            n_y_idx = 1
+    # Repeat to match x_batch_size if defined
+    if x_batch_size is not None:
+        y_idx = y_idx.repeat(x_batch_size)
+    return n_y_idx, y_idx
 
 
 @torch.no_grad()
-def _prepare_x(x, y_size, dtype=torch.float32, device='cpu', unsqueeze=False):
-    x = torch.as_tensor(x, dtype=dtype, device=device)
-    if unsqueeze:
-        x = x.unsqueeze(dim=0)
-    repeat = (y_size,) + (1,)*(x.dim()-1)
-    return x.repeat(*repeat)
+def _prepare_x_dtld(x, x_size, dtld_func, x_batch_size, x_seed, dtype, device,
+                    dtld_kwargs):
+    # x sampled from the dataloader (x is n_x, or None)
+    if (x is None) or isinstance(x, int):
+        # Check x_size
+        assert x_size is not None, 'x_size must be defined if x is sampled.'
+        if isinstance(x_size, int):
+            x_size = (x_size,)
+        # Init x dataloader
+        assert dtld_func is not None, (
+            'dtld_func must be defined if x is sampled.')
+        if dtld_kwargs is None:
+            dtld_kwargs = {}
+        x_dtld = dtld_func(batch_size=x_batch_size, seed=x_seed, **dtld_kwargs)
+        # Compute n_x and n_x_batch
+        n_x_batch_max = max(
+            1, int(np.floor(len(x_dtld.dataset) / x_batch_size)))
+        n_x_max = n_x_batch_max * x_batch_size
+        if x is None:
+            n_x = n_x_max
+        else:
+            n_x = max(x_batch_size, min(x, n_x_max))
+        n_x_batch = n_x // x_batch_size
+        return x_dtld, n_x, n_x_batch, x_size
+    # Predefined x
+    if not torch.is_tensor(x):
+        x = torch.as_tensor(x, dtype=dtype, device=device)
+    # Check x_batch_size
+    n_x = x.size(0)
+    assert not n_x % x_batch_size, 'n_x must be a multiple of x_batch_size.'
+    # Compute n_x_batch
+    n_x_batch = n_x // x_batch_size
+    # Build x_dtld
+    x_dtld = [
+        (x[i*x_batch_size:(i+1)*x_batch_size], None) for i in range(n_x_batch)]
+    return x_dtld, n_x, n_x_batch, x.size()[1:]
 
 
 @torch.no_grad()
-def _prepare_x_0_dtld(dtld_func, x_0, x_size, n_x_0_per_batch=None, seed=100,
-                      dtype=torch.float32, device='cpu', dtld_kwargs=None):
+def _prepare_x_0_dtld(x_0, x_size, dtld_func, x_batch_size, x_0_batch_size,
+                      x_0_seed, dtype, device, dtld_kwargs):
     # Random baseline (x_0 is n_x_0)
     if isinstance(x_0, int):
-        if n_x_0_per_batch is None:
-            n_x_0_per_batch = x_0
-        n_x_0_per_batch = min(x_0, max(1, n_x_0_per_batch))
-        n_batch = max(1, int(np.ceil(x_0 / n_x_0_per_batch)))
+        assert dtld_func is not None, (
+            'dtld_func must be defined if x_0 is sampled.')
+        if x_0_batch_size is None:
+            x_0_batch_size = x_0
+        x_0_batch_size = min(x_0, max(1, x_0_batch_size))
+        n_x_0_batch = max(1, int(np.ceil(x_0 / x_0_batch_size)))
         if dtld_kwargs is None:
             dtld_kwargs = {}
         x_0_dtld = dtld_func(
-            batch_size=n_x_0_per_batch, seed=seed, **dtld_kwargs)
-        assert len(x_0_dtld) > n_batch
-        return x_0_dtld, n_batch, n_x_0_per_batch
-    # Predefined baseline
+            batch_size=x_0_batch_size * x_batch_size, seed=x_0_seed,
+            **dtld_kwargs)
+        assert len(x_0_dtld) >= n_x_0_batch
+        return x_0_dtld, n_x_0_batch, x_0_batch_size
+    # Zero baseline
     if x_0 is None:
-        x_0 = torch.zeros(1, *x_size, dtype=dtype, device=device)
-    elif not torch.is_tensor(x_0):
+        x_0 = torch.zeros(x_batch_size, *x_size, dtype=dtype, device=device)
+        return [(x_0, None)], 1, 1
+    # Predefined baseline
+    if not torch.is_tensor(x_0):
         x_0 = torch.as_tensor(x_0, dtype=dtype, device=device)
     if x_0.dim() == len(x_size):
         x_0 = x_0.unsqueeze(dim=0)
+    x_0_batch_size = x_0.size(0)
+    x_0 = x_0.repeat_interleave(x_batch_size, dim=0)
     assert x_0.size()[1:] == x_size, 'Incompatible x and x_0 shapes.'
-    return [(x_0, None)], 1, x_0.size(0)
+    return [(x_0, None)], 1, x_0_batch_size
 
 
 @torch.no_grad()
-def _record_x_y(x, y, y_idx):
-    x = x.squeeze(dim=0).cpu().numpy()
-    y = torch.gather(y.squeeze(dim=0), dim=0, index=y_idx.cpu()).cpu().numpy()
-    return x, y
+def _record_x_y(x, y, y_idx, x_batch_size):
+    if y is not None:
+        y = torch.gather(
+            y.cpu(), dim=1, index=y_idx.view(x_batch_size, -1).cpu()).numpy()
+    return x.cpu().numpy(), y
 
 
 def _set_dtld_seed(dtld, seed):
@@ -155,256 +193,211 @@ def _set_dtld_seed(dtld, seed):
 # Gradients
 
 
-def grad_1_x(grad_func, x, y_size, y_idx=None, dtype=torch.float32,
-             device='cpu', grad_kwargs=None):
+def grad(grad_func, x=None, y_idx=None, x_size=None, y_size=None,
+         dtld_func=None, x_batch_size=1, x_seed=None, dtype=torch.float32,
+         device='cpu', dtld_kwargs=None, grad_kwargs=None):
     """
-    Compute gradients:
-        - for one input (x:array)
+    Compute gradients (grad:array [n_x, n_y_idx, ...]):
+        - for all inputs (x:array [n_x, ...]), for n_x inputs sampled from
+        the dataloader (x:int), or all inputs of the dataloader (x:None)
         - w.r.t. one specific output component index (y_idx:int), multiple
         component indices (y_idx:array), or all components (y_idx:None)
     """
     if grad_kwargs is None:
         grad_kwargs = {}
+    # Prepare x dataloader
+    x_dtld, n_x, n_x_batch, x_size = _prepare_x_dtld(
+        x, x_size, dtld_func, x_batch_size, x_seed, dtype, device, dtld_kwargs)
     # Prepare y_idx
-    y_size, y_idx = _prepare_y_idx(y_size, y_idx, device)
-    # Prepare x
-    x = _prepare_x(x, y_size, dtype, device, unsqueeze=True)
-    # Compute gradients
-    return grad_func(x=x, y_idx=y_idx, **grad_kwargs)
-
-
-def grad_dtld(dtld_func, grad_func, x_size, y_size, n_samples=None, y_idx=None,
-              seed=None, dtype=torch.float32, device='cpu', dtld_kwargs=None,
-              grad_kwargs=None):
-    """
-    Compute gradients:
-        - for n inputs sampled from the dataloader (n_samples:int),
-        or all inputs (n_samples:None)
-        - w.r.t. one specific output component index (y_idx:int), multiple
-        component indices (y_idx:array), or all components (y_idx:None)
-    """
-    if isinstance(x_size, int):
-        x_size = (x_size,)
-    if dtld_kwargs is None:
-        dtld_kwargs = {}
-    if grad_kwargs is None:
-        grad_kwargs = {}
-    # Prepare dataloader
-    dtld = dtld_func(batch_size=1, seed=seed, **dtld_kwargs)
-    if n_samples is None:
-        n_samples = len(dtld)
-    # Prepare y_idx
-    y_size, y_idx = _prepare_y_idx(y_size, y_idx, device)
+    n_y_idx, y_idx = _prepare_y_idx(y_idx, y_size, device, x_batch_size)
     # Prepare outputs
-    x = np.zeros((n_samples,) + x_size, dtype=np.float32)
-    y = np.zeros((n_samples, y_size), dtype=np.float32)
-    y_r = np.zeros((n_samples, y_size), dtype=np.float32)
-    grad = np.zeros((n_samples, y_size) + x_size, dtype=np.float32)
-    # Iterate over dataset samples
-    for i, (x_i, y_i) in enumerate(dtld):
-        # Break when n_samples is reached
-        if i == n_samples:
+    x_np = np.zeros((n_x,) + x_size, dtype=np.float32)
+    y_np = np.zeros((n_x, n_y_idx), dtype=np.float32)
+    y_r = np.zeros((n_x, n_y_idx), dtype=np.float32)
+    grad_ = np.zeros((n_x, n_y_idx) + x_size, dtype=np.float32)
+    # Iterate over dataloader
+    for i, (x_i, y_i) in enumerate(x_dtld):
+        # Break when n_x_batch is reached
+        if i == n_x_batch:
             break
+        # Current slice
+        slc = slice(i*x_batch_size, (i+1)*x_batch_size)
         # Record x, y
-        x_i_np, y_i_np = _record_x_y(x_i, y_i, y_idx)
-        x[i] += x_i_np
-        y[i] += y_i_np
+        x_i_np, y_i_np = _record_x_y(x_i, y_i, y_idx, x_batch_size)
+        x_np[slc] += x_i_np
+        if y_i_np is not None:
+            y_np[slc] += y_i_np
         # Prepare x
-        x_i = _prepare_x(x_i, y_size, dtype, device)
+        x_i = x_i.repeat_interleave(n_y_idx, dim=0).to(device)
         # Compute gradients
         y_r_i, grad_i = grad_func(x=x_i, y_idx=y_idx, **grad_kwargs)
-        y_r[i] += y_r_i
-        grad[i] += grad_i
-    return x, y, y_r, grad
+         # Reshape
+        y_r_i = y_r_i.reshape((x_batch_size, -1))
+        grad_i = grad_i.reshape((x_batch_size, -1) + grad_i.shape[1:])
+        # Record results
+        y_r[slc] += y_r_i
+        grad_[slc] += grad_i
+    return x_np, y_np, y_r, grad_
 
 
 # Integrated gradients
 
 
-def _int_grad_1_x_1_y(x_0_dtld, grad_func, x, y_idx, n_batch, n_steps,
-                      n_x_0_per_batch, dtype=torch.float32, device='cpu',
-                      check_error=False, grad_kwargs=None):
-    if grad_kwargs is None:
-        grad_kwargs = {}
+def _int_grad_1_y_idx(grad_func, x, y_idx, x_0_dtld, n_steps, x_batch_size,
+                      n_x_0_batch, x_0_batch_size, dtype, device, grad_kwargs,
+                      check_error):
     with torch.no_grad():
         # Prepare inputs
-        repeat = (n_x_0_per_batch,) + (1,)*x.dim()
-        x = x.unsqueeze(dim=0).repeat(*repeat).to(device)
-        y_idx = y_idx.repeat(n_steps * n_x_0_per_batch).to(device)
+        repeat = (x_0_batch_size,) + (1,)*(x.dim()-1)
+        x = x.repeat(*repeat).to(device)
+        y_idx = y_idx.expand(x_batch_size*x_0_batch_size*n_steps).to(device)
+        # Prepare interpolation coefficients
+        w = torch.linspace(0.0, 1.0, n_steps, dtype=dtype, device=device)[
+            (...,) + (None,) * x.dim()]
     # Compute integrated gradients
-    y_0 = 0.0
-    y_r = 0.0
-    int_grad = np.zeros(x.size()[1:], dtype=np.float32)
+    y_0 = np.zeros(x_batch_size, dtype=np.float32)
+    y_r = np.zeros(x_batch_size, dtype=np.float32)
+    int_grad_ = np.zeros((x_batch_size,) + x.size()[1:], dtype=np.float32)
     for i, (x_0_i, _) in enumerate(x_0_dtld):
-        # Break when n_batch is reached
-        if i == n_batch:
+        # Break when n_x_0_batch is reached
+        if i == n_x_0_batch:
             break
         # Send baseline to device
         x_0_i = x_0_i.to(device)
         # Generate inputs along a linear path between x_0 and x
         with torch.no_grad():
-            w = torch.linspace(
-                0.0, 1.0, n_steps, dtype=dtype,
-                device=device)[(...,) + (None,) * x.dim()]
-            x_s_i = (1.0 - w) * x_0_i.unsqueeze(dim=0)\
-                + w * x.unsqueeze(dim=0)
+            x_s_i = (1.0 - w)*x_0_i.unsqueeze(dim=0) + w*x.unsqueeze(dim=0)
             x_s_i = x_s_i.flatten(0, 1)
         # Compute predictions and gradients
-        y_r_i, grads_i = grad_func(x=x_s_i, y_idx=y_idx, **grad_kwargs)
-        y_r_i = y_r_i.reshape((n_steps, n_x_0_per_batch))
-        grads_i = grads_i.reshape((n_steps,) + x.size())
+        y_r_i, grad_i = grad_func(x=x_s_i, y_idx=y_idx, **grad_kwargs)
+        y_r_i = y_r_i.reshape((n_steps, x_0_batch_size, x_batch_size))
+        grad_i = grad_i.reshape(
+            (n_steps, x_0_batch_size, x_batch_size) + x.size()[1:])
         # Compute integrated gradients (Riemann sums, trapezoidal rule)
-        y_0 += np.sum(y_r_i[0])
-        y_r += np.sum(y_r_i[-1])
-        int_grad_i = grads_i[:-1] + grads_i[1:]
+        y_0 += np.sum(y_r_i[0], axis=0)
+        y_r += np.sum(y_r_i[-1], axis=0)
+        int_grad_i = grad_i[:-1] + grad_i[1:]
         int_grad_i = 0.5 * np.mean(int_grad_i, axis=0)
-        int_grad_i *= (x - x_0_i).cpu().numpy()
-        int_grad += np.sum(int_grad_i, axis=0)
+        int_grad_i *= (x - x_0_i).cpu().numpy().reshape(
+            (x_0_batch_size, x_batch_size) + x.size()[1:])
+        int_grad_ += np.sum(int_grad_i, axis=0)
     # Normalize across baselines
-    n_x_0 = float(n_batch * n_x_0_per_batch)
+    n_x_0 = float(n_x_0_batch * x_0_batch_size)
     y_0 /= n_x_0
     y_r /= n_x_0
-    int_grad /= n_x_0
+    int_grad_ /= n_x_0
     # Check integrated gradients error
     if check_error:
-        print(f'error: {np.sum(int_grad) - y_r + y_0}')
-    return y_0, y_r, int_grad
+        int_grad_sum = np.sum(int_grad_.reshape((x_batch_size, -1)), axis=1)
+        print(f'error: {int_grad_sum - y_r + y_0}')
+    return y_0, y_r, int_grad_
 
 
-def int_grad_1_x(dtld_func, grad_func, x, y_size, y_idx=None, x_0=None,
-                 n_steps=32, n_x_0_per_batch=None, x_0_seed=100,
-                 dtype=torch.float32, device='cpu', check_error=False,
-                 dtld_kwargs=None, grad_kwargs=None):
+def int_grad(grad_func, x=None, y_idx=None, x_0=None, n_steps=32, x_size=None,
+             y_size=None, dtld_func=None, x_batch_size=1, x_0_batch_size=None,
+             x_seed=None, x_0_seed=100, dtype=torch.float32, device='cpu',
+             dtld_kwargs=None, grad_kwargs=None, check_error=False,
+             description=''):
     """
-    Compute integrated gradients:
-        - for one input (x:array)
+    Compute integrated gradients (int_grad:array [n_x, n_y_idx, ...]):
+        - for all inputs (x:array [n_x, ...]), for n_x inputs sampled from
+        the dataloader (x:int), or all inputs of the dataloader (x:None)
         - w.r.t. one specific output component index (y_idx:int), multiple
         component indices (y_idx:array), or all components (y_idx:None)
         - using a predifined baseline (x_0:array), n baselines sampled from
-        the dataloader (x_0:int), or initialized to a zero vector (x_0:None).
+        the dataloader (x_0:int), or initialized to a zero vector (x_0:None)
     """
+    if grad_kwargs is None:
+        grad_kwargs = {}
+    # Prepare x dataloader
+    x_dtld, n_x, n_x_batch, x_size = _prepare_x_dtld(
+        x, x_size, dtld_func, x_batch_size, x_seed, dtype, device, dtld_kwargs)
     # Prepare y_idx
-    y_size, y_idx = _prepare_y_idx(y_size, y_idx, device)
-    # Prepare x
-    x = _prepare_x(x, y_size, dtype, device, unsqueeze=True)
-    # Prepare x_0 (baseline) dataloader
-    x_0_dtld, n_batch, n_x_0_per_batch = _prepare_x_0_dtld(
-        dtld_func, x_0, x.size()[1:], n_x_0_per_batch, x_0_seed, dtype, device,
-        dtld_kwargs)
+    n_y_idx, y_idx = _prepare_y_idx(y_idx, y_size, device, x_batch_size)
+    # Prepare x_0 dataloader
+    x_0_dtld, n_x_0_batch, x_0_batch_size = _prepare_x_0_dtld(
+        x_0, x_size, dtld_func, x_batch_size, x_0_batch_size, x_0_seed, dtype,
+        device, dtld_kwargs)
     # Prepare outputs
-    y_0 = np.zeros(y_size, dtype=np.float32)
-    y_r = np.zeros(y_size, dtype=np.float32)
-    int_grad = np.zeros(x.size(), dtype=np.float32)
-    # Iterate over y
-    for i in tqdm(range(y_size), total=y_size, desc='ig'):
-        y_0_i, y_r_i, int_grad_i = _int_grad_1_x_1_y(
-            x_0_dtld, grad_func, x[i], y_idx[i], n_batch, n_steps,
-            n_x_0_per_batch, dtype, device, check_error, grad_kwargs)
-        y_0[i] += y_0_i
-        y_r[i] += y_r_i
-        int_grad[i] += int_grad_i
-    return y_0, y_r, int_grad
-
-
-def int_grad_dtld(dtld_func, grad_func, x_size, y_size, n_samples=None,
-                  y_idx=None, x_0=None, n_steps=32, n_x_0_per_batch=None,
-                  seed=None, x_0_seed=100, dtype=torch.float32, device='cpu',
-                  check_error=False, dtld_kwargs=None, grad_kwargs=None,
-                  description=''):
-    """
-    Compute integrated gradients:
-        - for n inputs sampled from the dataloader (n_samples:int),
-        or all inputs (n_samples:None)
-        - w.r.t. one specific output component index (y_idx:int), multiple
-        component indices (y_idx:array), or all components (y_idx:None)
-        - using a predifined baseline (x_0:array), n baselines sampled from
-        the dataloader (x_0:int), or initialized to a zero vector (x_0:None).
-    """
-    if isinstance(x_size, int):
-        x_size = (x_size,)
-    if dtld_kwargs is None:
-        dtld_kwargs = {}
-    # Prepare dataloader
-    dtld = dtld_func(batch_size=1, seed=seed, **dtld_kwargs)
-    if n_samples is None:
-        n_samples = len(dtld)
-    # Prepare y_idx
-    y_size, y_idx = _prepare_y_idx(y_size, y_idx, device)
-    # Prepare x_0 (baseline) dataloader
-    x_0_dtld, n_batch, n_x_0_per_batch = _prepare_x_0_dtld(
-        dtld_func, x_0, x_size, n_x_0_per_batch, x_0_seed, dtype, device,
-        dtld_kwargs)
-    # Prepare outputs
-    x = np.zeros((n_samples,) + x_size, dtype=np.float32)
-    y = np.zeros((n_samples, y_size), dtype=np.float32)
-    y_0 = np.zeros((n_samples, y_size), dtype=np.float32)
-    y_r = np.zeros((n_samples, y_size), dtype=np.float32)
-    int_grad = np.zeros((n_samples, y_size) + x_size, dtype=np.float32)
-    # Iterate over dataset samples
+    x_np = np.zeros((n_x,) + x_size, dtype=np.float32)
+    y_np = np.zeros((n_x, n_y_idx), dtype=np.float32)
+    y_0 = np.zeros((n_x, n_y_idx), dtype=np.float32)
+    y_r = np.zeros((n_x, n_y_idx), dtype=np.float32)
+    int_grad_ = np.zeros((n_x, n_y_idx) + x_size, dtype=np.float32)
+    # Iterate over dataloader
     if not description:
         description = 'ig'
     for i, (x_i, y_i) in enumerate(
-            tqdm(dtld, total=n_samples, desc=description)):
-        # Break when n_samples is reached
-        if i == n_samples:
+            tqdm(x_dtld, total=n_x_batch, desc=description)):
+        # Break when n_x_batch is reached
+        if i == n_x_batch:
             break
+        # Current slice
+        slc = slice(i*x_batch_size, (i+1)*x_batch_size)
         # Record x, y
-        x_i_np, y_i_np = _record_x_y(x_i, y_i, y_idx)
-        x[i] += x_i_np
-        y[i] += y_i_np
-        # Iterate over y
+        x_i_np, y_i_np = _record_x_y(x_i, y_i, y_idx, x_batch_size)
+        x_np[slc] += x_i_np
+        if y_i_np is not None:
+            y_np[slc] += y_i_np
+        # Iterate over y_idx
         if not isinstance(x_0_dtld, list):
             _set_dtld_seed(x_0_dtld, int(x_0_seed+1e6*(i+1)))
-        for j in range(y_size):
-            y_0_ij, y_r_ij, int_grad_ij = _int_grad_1_x_1_y(
-                x_0_dtld, grad_func, x_i[0], y_idx[j], n_batch, n_steps,
-                n_x_0_per_batch, dtype, device, check_error, grad_kwargs)
-            y_0[i, j] += y_0_ij
-            y_r[i, j] += y_r_ij
-            int_grad[i, j] += int_grad_ij
-    return x, y, y_0, y_r, int_grad
+        for j in range(n_y_idx):
+            y_0_ij, y_r_ij, int_grad_ij = _int_grad_1_y_idx(
+                grad_func, x_i, y_idx[j], x_0_dtld, n_steps, x_batch_size,
+                n_x_0_batch, x_0_batch_size, dtype, device, grad_kwargs,
+                check_error)
+            y_0[slc, j] += y_0_ij
+            y_r[slc, j] += y_r_ij
+            int_grad_[slc, j] += int_grad_ij
+    return x_np, y_np, y_0, y_r, int_grad_
 
 
 # Integrated gradient correlation
 
 
-def int_grad_corr_dtld(dtld_func, grad_func, x_size, y_size, y_idx=None,
-                       x_0=None, n_steps=32, n_x_0_per_batch=None,
-                       x_0_seed=100, dtype=torch.float32, device='cpu',
-                       check_error=False, dtld_kwargs=None, grad_kwargs=None):
+def int_grad_corr(grad_func, dtld_func, x_size, y_size, y_idx=None, x_0=None,
+                  n_steps=32, x_batch_size=1, x_0_batch_size=None,
+                  x_0_seed=100, dtype=torch.float32, device='cpu',
+                  dtld_kwargs=None, grad_kwargs=None, check_error=False):
     """
-    Compute integrated gradient correlation:
-        - for all inputs from the dataloader
+    Compute integrated gradient correlation (igc:array [n_y_idx, ...]):
+        - for all inputs of the dataloader
         - w.r.t. one specific output component index (y_idx:int), multiple
         component indices (y_idx:array), or all components (y_idx:None)
         - using a predifined baseline (x_0:array), n baselines sampled from
-        the dataloader (x_0:int), or initialized to a zero vector (x_0:None).
+        the dataloader (x_0:int), or initialized to a zero vector (x_0:None)
     """
+    # Check x_size
     if isinstance(x_size, int):
         x_size = (x_size,)
-    y_size, y_idx = _iter_y_idx(y_size, y_idx)
+    # Prepare y_idx
+    n_y_idx, y_idx = _prepare_y_idx(y_idx, y_size, device)
     # Prepare outputs
-    corr = np.zeros(y_size, dtype=np.float32)
-    int_grad_corr = np.zeros((y_size,) + x_size, dtype=np.float32)
-    # Iterate over y
+    corr = np.zeros(n_y_idx, dtype=np.float32)
+    int_grad_corr_ = np.zeros((n_y_idx,) + x_size, dtype=np.float32)
+    # Iterate over y_idx
     for i, j in enumerate(y_idx):
-        _, y, y_0, y_r, int_grad = int_grad_dtld(
-            dtld_func, grad_func, x_size, y_size, None, j, x_0, n_steps,
-            n_x_0_per_batch, None, x_0_seed, dtype, device, False, dtld_kwargs,
-            grad_kwargs, description=f'igc {i+1}/{y_size}')
-        y, y_0, y_r, int_grad = y[:, 0], y_0[:, 0], y_r[:, 0], int_grad[:, 0]
+        # Compute integrated gradients
+        x, x_seed = None, None
+        _, y, y_0, y_r, int_grad_ = int_grad(
+            grad_func, x, j, x_0, n_steps, x_size, y_size, dtld_func,
+            x_batch_size, x_0_batch_size, x_seed, x_0_seed, dtype, device,
+            dtld_kwargs, grad_kwargs, check_error=False,
+            description=f'igc {i+1}/{n_y_idx}')
+        y, y_0, y_r, int_grad_ = y[:, 0], y_0[:, 0], y_r[:, 0], int_grad_[:, 0]
         # Compute output correlation
         if check_error:
             corr[i] += pearsonr(y_r, y)[0]
         # Compute integrated gradient correlation
         mu_y, std_y, std_y_r = np.mean(y), np.std(y), np.std(y_r)
         int_grad_corr_i = np.mean(
-            int_grad * (y - mu_y)[(...,) + (None,)*len(x_size)], axis=0)
+            int_grad_ * (y - mu_y)[(...,) + (None,)*len(x_size)], axis=0)
         int_grad_corr_i /= std_y
         int_grad_corr_i /= std_y_r
-        int_grad_corr[i] += int_grad_corr_i
+        int_grad_corr_[i] += int_grad_corr_i
     # Check integrated gradient correlation error
     if check_error:
-        error = np.sum(np.reshape(int_grad_corr, (y_size, -1)), axis=1) - corr
-        print(f'error : {error}')
-    return int_grad_corr
+        igc_sum = np.sum(np.reshape(int_grad_corr_, (n_y_idx, -1)), axis=1)
+        print(f'error : {igc_sum - corr}')
+    return int_grad_corr_

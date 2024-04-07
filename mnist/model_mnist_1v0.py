@@ -19,9 +19,7 @@ from mnist.mnist import MNIST
 from torchutils import (
     AbstractModel, PMish, init_linear, init_conv, set_dtld_seed,
     set_worker_seed)
-from igc import (
-    grad_1_x, grad_dtld, int_grad_1_x, int_grad_dtld, int_grad_corr_dtld,
-    bsl_shap_1_x, bsl_shap_dtld, bsl_shap_corr_dtld)
+from igc import grad, int_grad, int_grad_corr, bsl_shap, bsl_shap_corr
 
 
 # Dataset
@@ -72,7 +70,7 @@ class Dataset():
         print(f'Val   : {self.n_val}')
 
     @torch.no_grad()
-    def flow_train(self, batch_size, seed=100, num_workers=0):
+    def train_dtld(self, batch_size, seed=100, num_workers=0):
         return DataLoader(
             _Dataset(self.train_images, self.train_labels, self.n_digits),
             batch_size=batch_size, shuffle=True, num_workers=num_workers,
@@ -80,7 +78,7 @@ class Dataset():
             generator=torch.Generator().manual_seed(seed))
 
     @torch.no_grad()
-    def flow_val(self, batch_size, seed=None, num_workers=0):
+    def val_dtld(self, batch_size, seed=None, num_workers=0):
         if seed is None:
             return DataLoader(
                 _Dataset(self.val_images, self.val_labels, self.n_digits),
@@ -263,8 +261,8 @@ class Model(AbstractModel):
     def train(self, n_epoch=1, batch_size=64):
         self.restore('last', training=True)
         writer = SummaryWriter(self.logs_path)
-        train_dtld = self.dtst.flow_train(batch_size, self.seed)
-        val_dtld = self.dtst.flow_val(batch_size)
+        train_dtld = self.dtst.train_dtld(batch_size, self.seed)
+        val_dtld = self.dtst.val_dtld(batch_size)
         for _ in range(int(n_epoch)):
             self.current_epoch += 1
             current_seed = self.seed + self.current_epoch
@@ -335,7 +333,7 @@ class Model(AbstractModel):
         # Eval
         self.network.eval()
         val_nll_avg, val_ac_avg = 0.0, 0.0
-        dtld = self.dtst.flow_val(batch_size)
+        dtld = self.dtst.val_dtld(batch_size)
         for _, (x, y) in enumerate(tqdm(dtld, total=len(dtld), desc='score')):
             # Send data to device
             x = x.to(self.device)
@@ -365,62 +363,63 @@ class Model(AbstractModel):
         prob.backward(gradient=torch.ones_like(prob))
         return prob.squeeze(dim=1).detach().cpu().numpy(), x.grad.cpu().numpy()
 
-    def grad_1_x(self, x, y_idx=None, checkpoint='best'):
+    def grad_x(self, x, y_idx=None, x_batch_size=1, checkpoint='best'):
         grad_kwargs = {'checkpoint': checkpoint}
-        p_r, grad = grad_1_x(
-            self._grad, x, self.dtst.n_digits, y_idx, self.dtype, self.device,
-            grad_kwargs)
-        return p_r, grad
+        _, _, p_r, grad_ = grad(
+            self._grad, x, y_idx, y_size=self.dtst.n_digits,
+            x_batch_size=x_batch_size, dtype=self.dtype, device=self.device,
+            grad_kwargs=grad_kwargs)
+        return p_r, grad_
 
-    def grad_val(self, n_samples=None, y_idx=None, seed=None,
+    def grad_val(self, n_x=None, y_idx=None, x_batch_size=1, x_seed=None,
                  checkpoint='best'):
         x_size = (self.dtst.img_size, self.dtst.img_size)
         grad_kwargs = {'checkpoint': checkpoint}
-        x, y, p_r, grad = grad_dtld(
-            self.dtst.flow_val, self._grad, x_size, self.dtst.n_digits,
-            n_samples, y_idx, seed, self.dtype, self.device,
+        x, y, p_r, grad_ = grad(
+            self._grad, n_x, y_idx, x_size, self.dtst.n_digits,
+            self.dtst.val_dtld, x_batch_size, x_seed, self.dtype, self.device,
             grad_kwargs=grad_kwargs)
-        return x, y, p_r, grad
+        return x, y, p_r, grad_
 
-    def int_grad_1_x(self, x, y_idx=None, x_0=32, n_steps=32,
-                     n_x_0_per_batch=None, x_0_seed=100, check_error=False,
-                     checkpoint='best'):
+    def int_grad_x(self, x, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
+                   x_0_batch_size=None, x_0_seed=100, check_error=False,
+                   checkpoint='best'):
         grad_kwargs = {'checkpoint': checkpoint}
-        p_0, p_r, int_grad = int_grad_1_x(
-            self.dtst.flow_val, self._grad, x, self.dtst.n_digits, y_idx, x_0,
-            n_steps, n_x_0_per_batch, x_0_seed, self.dtype, self.device,
-            check_error, grad_kwargs=grad_kwargs)
-        return p_0, p_r, int_grad
+        _, _, p_0, p_r, int_grad_ = int_grad(
+            self._grad, x, y_idx, x_0, n_steps, y_size=self.dtst.n_digits,
+            dtld_func=self.dtst.val_dtld, x_batch_size=x_batch_size,
+            x_0_batch_size=x_0_batch_size, x_0_seed=x_0_seed, dtype=self.dtype,
+            device=self.device, grad_kwargs=grad_kwargs,
+            check_error=check_error)
+        return p_0, p_r, int_grad_
 
-    def int_grad_val(self, n_samples=None, y_idx=None, x_0=32, n_steps=32,
-                     n_x_0_per_batch=None, seed=None, x_0_seed=100,
-                     check_error=False, checkpoint='best'):
+    def int_grad_val(self, n_x=None, y_idx=None, x_0=32, n_steps=32,
+                     x_batch_size=1, x_0_batch_size=None, x_seed=None,
+                     x_0_seed=100, check_error=False, checkpoint='best'):
         x_size = (self.dtst.img_size, self.dtst.img_size)
         grad_kwargs = {'checkpoint': checkpoint}
-        x, y, p_0, p_r, int_grad = int_grad_dtld(
-            self.dtst.flow_val, self._grad, x_size, self.dtst.n_digits,
-            n_samples, y_idx, x_0, n_steps, n_x_0_per_batch, seed, x_0_seed,
-            self.dtype, self.device, check_error, grad_kwargs=grad_kwargs)
-        return x, y, p_0, p_r, int_grad
+        x, y, p_0, p_r, int_grad_ = int_grad(
+            self._grad, n_x, y_idx, x_0, n_steps, x_size, self.dtst.n_digits,
+            self.dtst.val_dtld, x_batch_size, x_0_batch_size, x_seed, x_0_seed,
+            self.dtype, self.device, grad_kwargs=grad_kwargs,
+            check_error=check_error)
+        return x, y, p_0, p_r, int_grad_
 
-    def int_grad_corr_val(self, y_idx=None, x_0=32, n_steps=32,
-                          n_x_0_per_batch=None, x_0_seed=100,
-                          save_results=True, check_error=False,
-                          checkpoint='best', suffix=''):
+    def int_grad_corr_val(self, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
+                          x_0_batch_size=None, x_0_seed=100, save_results=True,
+                          check_error=False, checkpoint='best', suffix=''):
         if suffix:
             suffix = '_' + suffix
         x_size = (self.dtst.img_size, self.dtst.img_size)
         grad_kwargs = {'checkpoint': checkpoint}
-        int_grad_corr = int_grad_corr_dtld(
-            self.dtst.flow_val, self._grad, x_size, self.dtst.n_digits, y_idx,
-            x_0, n_steps, n_x_0_per_batch, x_0_seed, self.dtype, self.device,
-            check_error, grad_kwargs=grad_kwargs)
-        # Save results
+        int_grad_corr_ = int_grad_corr(
+            self._grad, self.dtst.val_dtld, x_size, self.dtst.n_digits, y_idx,
+            x_0, n_steps, x_batch_size, x_0_batch_size, x_0_seed, self.dtype,
+            self.device, grad_kwargs=grad_kwargs, check_error=check_error)
         if save_results:
             np.save(self.get_result_path(
-                f'int_grad_corr{suffix}.npy'), int_grad_corr)
-        # Return results
-        return int_grad_corr
+                f'int_grad_corr{suffix}.npy'), int_grad_corr_)
+        return int_grad_corr_
 
     @torch.no_grad()
     def _forward(self, x, y_idx, checkpoint='best'):
@@ -434,46 +433,46 @@ class Model(AbstractModel):
         return prob.squeeze(dim=1).cpu().numpy()
 
     @torch.no_grad()
-    def bsl_shap_1_x(self, x, y_idx=None, x_0=32, n_iter=32,
-                     n_x_0_per_batch=None, x_0_seed=100, check_error=False,
-                     checkpoint='best'):
+    def bsl_shap_x(self, x, y_idx=None, x_0=32, n_iter=32, x_0_batch_size=None,
+                   x_0_seed=100, check_error=False, checkpoint='best'):
         forward_kwargs = {'checkpoint': checkpoint}
-        p_0, p_r, bsl_shap = bsl_shap_1_x(
-            self.dtst.flow_val, self._forward, x, self.dtst.n_digits, y_idx,
-            x_0, n_iter, n_x_0_per_batch, x_0_seed, self.dtype, self.device,
-            check_error, forward_kwargs=forward_kwargs)
-        return p_0, p_r, bsl_shap
+        _, _, p_0, p_r, bsl_shap_ = bsl_shap(
+            self._forward, x, y_idx, x_0, n_iter, y_size=self.dtst.n_digits,
+            dtld_func=self.dtst.val_dtld, x_0_batch_size=x_0_batch_size,
+            x_0_seed=x_0_seed, dtype=self.dtype, device=self.device,
+            forward_kwargs=forward_kwargs, check_error=check_error)
+        return p_0, p_r, bsl_shap_
 
     @torch.no_grad()
-    def bsl_shap_val(self, n_samples=None, y_idx=None, x_0=32, n_iter=32,
-                     n_x_0_per_batch=None, seed=None, x_0_seed=100,
+    def bsl_shap_val(self, n_x=None, y_idx=None, x_0=32, n_iter=32,
+                     x_0_batch_size=None, x_seed=None, x_0_seed=100,
                      check_error=False, checkpoint='best'):
         x_size = (self.dtst.img_size, self.dtst.img_size)
         forward_kwargs = {'checkpoint': checkpoint}
-        x, y, p_0, p_r, bsl_shap = bsl_shap_dtld(
-            self.dtst.flow_val, self._forward, x_size, self.dtst.n_digits,
-            n_samples, y_idx, x_0, n_iter, n_x_0_per_batch, seed, x_0_seed,
-            self.dtype, self.device, check_error,
-            forward_kwargs=forward_kwargs)
-        return x, y, p_0, p_r, bsl_shap
+        x, y, p_0, p_r, bsl_shap_ = bsl_shap(
+            self._forward, n_x, y_idx, x_0, n_iter, x_size, self.dtst.n_digits,
+            self.dtst.val_dtld, x_0_batch_size, x_seed, x_0_seed,
+            self.dtype, self.device, forward_kwargs=forward_kwargs,
+            check_error=check_error)
+        return x, y, p_0, p_r, bsl_shap_
 
     @torch.no_grad()
     def bsl_shap_corr_val(self, y_idx=None, x_0=32, n_iter=32,
-                          n_x_0_per_batch=None, x_0_seed=100,
-                          save_results=True, check_error=False,
-                          checkpoint='best', suffix='', n_samples=None):
+                          x_0_batch_size=None, x_0_seed=100, save_results=True,
+                          check_error=False, checkpoint='best', suffix='',
+                          n_x=None):
         if suffix:
             suffix = '_' + suffix
         x_size = (self.dtst.img_size, self.dtst.img_size)
         forward_kwargs = {'checkpoint': checkpoint}
-        bsl_shap_corr = bsl_shap_corr_dtld(
-            self.dtst.flow_val, self._forward, x_size, self.dtst.n_digits,
-            y_idx, x_0, n_iter, n_x_0_per_batch, x_0_seed, self.dtype,
-            self.device, check_error, forward_kwargs=forward_kwargs,
-            n_samples=n_samples)
+        bsl_shap_corr_ = bsl_shap_corr(
+            self._forward, self.dtst.val_dtld, x_size, self.dtst.n_digits,
+            y_idx, x_0, n_iter, x_0_batch_size, x_0_seed, self.dtype,
+            self.device, forward_kwargs=forward_kwargs,
+            check_error=check_error, n_x=n_x)
         # Save results
         if save_results:
             np.save(self.get_result_path(
-                f'bsl_shap_corr{suffix}.npy'), bsl_shap_corr)
+                f'bsl_shap_corr{suffix}.npy'), bsl_shap_corr_)
         # Return results
-        return bsl_shap_corr
+        return bsl_shap_corr_
