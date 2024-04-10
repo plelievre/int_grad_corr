@@ -276,7 +276,7 @@ class Model(AbstractModel):
                     desc=f'trn {self.current_epoch:04d}', leave=False)):
                 # Increment step
                 self.current_step += 1
-                # Send data to device
+                # Send data to the device
                 x = x.to(self.device)
                 y = y.to(self.device)
                 # Optimization
@@ -302,7 +302,7 @@ class Model(AbstractModel):
                 for i, (x, y) in enumerate(tqdm(
                         val_dtld, total=len(val_dtld),
                         desc=f'val {self.current_epoch:04d}', leave=False)):
-                    # Send data to device
+                    # Send data to the device
                     x = x.to(self.device)
                     y = y.to(self.device)
                     # Evaluation
@@ -335,7 +335,7 @@ class Model(AbstractModel):
         val_nll_avg, val_ac_avg = 0.0, 0.0
         dtld = self.dtst.val_dtld(batch_size)
         for _, (x, y) in enumerate(tqdm(dtld, total=len(dtld), desc='score')):
-            # Send data to device
+            # Send data to the device
             x = x.to(self.device)
             y = y.to(self.device)
             # Evaluation

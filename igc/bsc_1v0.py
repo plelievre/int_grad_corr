@@ -94,17 +94,16 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
         x=x[0].unsqueeze(dim=0), y_idx=y_idx[0].unsqueeze(dim=0),
         **forward_kwargs)[0]
     bsl_shap_ = np.zeros(x.size()[1:], dtype=np.float32)
+    # Iterate over baselines
     for i, (x_0_i, _) in enumerate(x_0_dtld):
         # Break when n_x_0_batch is reached
         if i == n_x_0_batch:
             break
-        # Send baseline to device
-        x_0_i = x_0_i.to(device)
         # Compute y_0_i
         y_0_i = forward_func(
             x=x_0_i, y_idx=y_idx[:x_0_batch_size], **forward_kwargs)
         y_0 += np.sum(y_0_i)
-        # Prepare and send baseline to device
+        # Prepare baseline
         x_0_i = x_0_i.repeat(*repeat_iter).to(device)
         # Prepare permutations
         rng = np.random.default_rng(int(perm_seed+1e3*(i+1)))
@@ -127,7 +126,7 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
             bsl_shap_ += np.sum(eval_diff[(...,) + (None,)*(
                 x.dim()-1)] * mask_j.cpu().numpy(), axis=0)
             prev_eval = modified_eval
-    # Normalize across baselines (and iterations)
+    # Average baselines (and iterations)
     n_x_0 = float(n_x_0_batch * x_0_batch_size)
     y_0 /= n_x_0
     bsl_shap_ /= n_x_0 * n_iter

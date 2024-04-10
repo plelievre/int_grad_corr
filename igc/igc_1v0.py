@@ -143,7 +143,7 @@ def _prepare_x_dtld(x, x_size, dtld_func, x_batch_size, x_seed, dtype, device,
 @torch.no_grad()
 def _prepare_x_0_dtld(x_0, x_size, dtld_func, x_batch_size, x_0_batch_size,
                       x_0_seed, dtype, device, dtld_kwargs):
-    # Random baseline (x_0 is n_x_0)
+    # Random baselines (x_0 is n_x_0)
     if isinstance(x_0, int):
         assert dtld_func is not None, (
             'dtld_func must be defined if x_0 is sampled.')
@@ -254,15 +254,16 @@ def _int_grad_1_y_idx(grad_func, x, y_idx, x_0_dtld, n_steps, x_batch_size,
         # Prepare interpolation coefficients
         w = torch.linspace(0.0, 1.0, n_steps, dtype=dtype, device=device)[
             (...,) + (None,) * x.dim()]
-    # Compute integrated gradients
+    # Prepare outputs
     y_0 = np.zeros(x_batch_size, dtype=np.float32)
     y_r = np.zeros(x_batch_size, dtype=np.float32)
     int_grad_ = np.zeros((x_batch_size,) + x.size()[1:], dtype=np.float32)
+    # Iterate over baselines
     for i, (x_0_i, _) in enumerate(x_0_dtld):
         # Break when n_x_0_batch is reached
         if i == n_x_0_batch:
             break
-        # Send baseline to device
+        # Send baselines to the device
         x_0_i = x_0_i.to(device)
         # Generate inputs along a linear path between x_0 and x
         with torch.no_grad():
@@ -281,7 +282,7 @@ def _int_grad_1_y_idx(grad_func, x, y_idx, x_0_dtld, n_steps, x_batch_size,
         int_grad_i *= (x - x_0_i).cpu().numpy().reshape(
             (x_0_batch_size, x_batch_size) + x.size()[1:])
         int_grad_ += np.sum(int_grad_i, axis=0)
-    # Normalize across baselines
+    # Average baselines
     n_x_0 = float(n_x_0_batch * x_0_batch_size)
     y_0 /= n_x_0
     y_r /= n_x_0
