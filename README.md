@@ -7,7 +7,7 @@
 
 | <img src=assets/igc_fmri.jpg /> |
 |:--:|
-| *IGC maps associated with the prediction of image mean luminance from fMRI data.* |
+| *IGC maps associated with the prediction of image luminance contrast from fMRI data.* |
 
 | <img src=assets/igc_mnist.jpg /> |
 |:--:|
