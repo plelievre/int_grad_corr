@@ -1,7 +1,7 @@
 """
 Baseline Shapley Correlation (BSC) utils.
 
-For optimization purposes, dataloader 'dtld_func', and gradient 'forward_func'
+For optimization purposes, dataloader 'dtld_func' and gradient 'forward_func'
 functions require some specific patterns. See below for generic examples.
 
 ———————— dtld_func

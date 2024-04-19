@@ -1,5 +1,5 @@
 """
-Abstract model, and other utils for PyTorch.
+Abstract model and other utils for PyTorch.
 
 Author: Pierre Lelievre
 """

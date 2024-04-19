@@ -1,7 +1,7 @@
 """
 Abstract model to ease device selection, determinism, and checkpoint managment.
 
-This abstract model must be subclassed, and redefine the following attributes:
+This abstract model must be subclassed and redefine the following attributes:
     - project_path
     - network
 And optionally:
@@ -108,7 +108,7 @@ class AbstractModel:
     def set_seed(self, seed=None):
         """
         Set seed of the default PyTorch random number generator (used for
-        weights initialization), and self.rng, a numpy random number generator.
+        weights initialization) and self.rng (a numpy random number generator).
         """
         if seed is not None:
             torch.manual_seed(seed)
@@ -116,7 +116,7 @@ class AbstractModel:
 
     def save(self, val_acc):
         """
-        Save current weights of the network, and update state variables.
+        Save current weights of the network and update state variables.
         Save optimizer and scheduler parameters, if defined.
         """
         if val_acc < self.best_val_acc:
@@ -145,8 +145,8 @@ class AbstractModel:
 
     def clean_saves(self):
         """
-        Clean up saves folder with self.maximum_saves best checkpoints, and
-        the last checkpoint (required to continue training).
+        Clean up saves folder with self.maximum_saves best checkpoints and the
+        last checkpoint (required to continue training).
         """
         checkpoint_val_acc = []
         for f in sorted(os.listdir(self.saves_path)):

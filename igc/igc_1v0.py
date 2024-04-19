@@ -1,7 +1,7 @@
 """
 Integrated Gradient Correlation (IGC) utils.
 
-For optimization purposes, dataloader 'dtld_func', and gradient 'grad_func'
+For optimization purposes, dataloader 'dtld_func' and gradient 'grad_func'
 functions require specific patterns. See below for generic examples.
 
 ———————— dtld_func
