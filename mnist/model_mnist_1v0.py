@@ -43,7 +43,7 @@ class _Dataset(TorchDataset):
         return image, nn.functional.one_hot(label, self.n_digits)
 
 
-class Dataset():
+class Dataset:
     def __init__(self, invert_image_luminance=False):
         self.mnist = MNIST()
         self.train_images = self.mnist.train_images
