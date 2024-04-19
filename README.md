@@ -11,7 +11,7 @@
 
 | <img src=assets/igc_mnist.jpg /> |
 |:--:|
-| *IGC maps of the MNIST dataset w.r.t. all possible digit classes.* |
+| *IGC maps for the MNIST dataset w.r.t. all possible digit classes.* |
 
 ## Requirements
 A suitable [conda](https://conda.io/) environment named **int_grad_corr** can be
