@@ -5,11 +5,12 @@
 [Pierre Lelièvre](https://plelievre.com)\*, Chien-Chung Chen\*<br>
 <sub><sup>\*Department of Psychology, National Taiwan University<sub><sup>
 
-| <img src=https://plelievre.com/media/paper_igc/igc_fmri_contrast.jpg /> |
+
+| ![IGC fMRI (luminance contrast)](https://plelievre.com/media/paper_igc/igc_fmri_contrast.jpg) |
 |:--:|
 | *IGC maps associated with the prediction of image luminance contrast from fMRI data.* |
 
-| <img src=https://plelievre.com/media/paper_igc/igc_mnist.jpg /> |
+| ![IGC MNIST](https://plelievre.com/media/paper_igc/igc_mnist.jpg) |
 |:--:|
 | *IGC maps for the MNIST dataset w.r.t. all possible digit classes.* |
 
