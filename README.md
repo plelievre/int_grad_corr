@@ -1,7 +1,7 @@
 # Integrated Gradient Correlation
-[arXiv](https://plelievre.com) | [BibTeX](#bibtex)
+[arXiv](http://arxiv.org/abs/2404.13910) | [BibTeX](#bibtex)
 
-[**Integrated Gradient Correlation: a Dataset-wise Attribution Method**](https://plelievre.com)<br/>
+[**Integrated Gradient Correlation: a Dataset-wise Attribution Method**](http://arxiv.org/abs/2404.13910)<br/>
 [Pierre Lelièvre](https://plelievre.com)\*, Chien-Chung Chen\*<br>
 <sub><sup>\*Department of Psychology, National Taiwan University<sub><sup>
 
@@ -42,6 +42,13 @@ can be easily employed with your own models and data.
 
 ## BibTeX
 
-```
-To be defined
+```bibtex
+@misc{lelièvre2024igc,
+    title={Integrated Gradient Correlation: a Dataset-wise Attribution Method},
+    author={Pierre Lelièvre and Chien-Chung Chen},
+    year={2024},
+    eprint={2404.13910},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
+}
 ```
