@@ -70,7 +70,6 @@ Author: Pierre Lelievre
 import torch
 import numpy as np
 from tqdm import tqdm
-from scipy.stats import pearsonr
 
 
 # Utils
@@ -190,6 +189,18 @@ def _set_dtld_seed(dtld, seed):
         dtld.dataset.rng.manual_seed(seed)
 
 
+def pearson_correlation(x, y, axis=-1):
+    x, y = x.astype(np.float64), y.astype(np.float64)
+    x_mean = np.mean(x, axis=axis, keepdims=True)
+    y_mean = np.mean(y, axis=axis, keepdims=True)
+    x_centered = x - x_mean
+    y_centered = y - y_mean
+    x_norm = np.linalg.norm(x_centered, axis=axis, keepdims=True)
+    y_norm = np.linalg.norm(y_centered, axis=axis, keepdims=True)
+    corr = np.sum(x_centered/x_norm * y_centered/y_norm, axis=axis)
+    return corr
+
+
 # Gradients
 
 
@@ -290,7 +301,7 @@ def _int_grad_1_y_idx(grad_func, x, y_idx, x_0_dtld, n_steps, x_batch_size,
     # Check integrated gradients error
     if check_error:
         int_grad_sum = np.sum(int_grad_.reshape((x_batch_size, -1)), axis=1)
-        print(f'error: {int_grad_sum - y_r + y_0}')
+        print(f'error y_idx={y_idx[0]}: {(int_grad_sum - y_r + y_0)[0]:>9.6f}')
     return y_0, y_r, int_grad_
 
 
@@ -389,7 +400,7 @@ def int_grad_corr(grad_func, dtld_func, x_size, y_size, y_idx=None, x_0=None,
         y, y_0, y_r, int_grad_ = y[:, 0], y_0[:, 0], y_r[:, 0], int_grad_[:, 0]
         # Compute output correlation
         if check_error:
-            corr[i] += pearsonr(y_r, y)[0]
+            corr[i] += pearson_correlation(y_r, y)
         # Compute integrated gradient correlation
         mu_y, std_y, std_y_r = np.mean(y), np.std(y), np.std(y_r)
         int_grad_corr_i = np.mean(
@@ -400,5 +411,6 @@ def int_grad_corr(grad_func, dtld_func, x_size, y_size, y_idx=None, x_0=None,
     # Check integrated gradient correlation error
     if check_error:
         igc_sum = np.sum(np.reshape(int_grad_corr_, (n_y_idx, -1)), axis=1)
-        print(f'error : {igc_sum - corr}')
+        for i, j in enumerate(y_idx):
+            print(f'error y_idx={j}: {igc_sum[i] - corr[i]:>9.6f}')
     return int_grad_corr_

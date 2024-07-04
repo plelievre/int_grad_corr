@@ -7,7 +7,6 @@ dependencies:
     - jupyter
     # Sciences
     - numpy
-    - scipy
     - matplotlib
     # Neural Networks
     - pytorch::pytorch=2.1

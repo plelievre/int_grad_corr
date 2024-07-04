@@ -64,14 +64,13 @@ Author: Pierre Lelievre
 
 import numpy as np
 from tqdm import tqdm
-from scipy.stats import pearsonr
 
 import torch
 from torch import nn
 
 from .igc_1v0 import (
     _prepare_y_idx, _prepare_x_dtld, _prepare_x_0_dtld, _record_x_y,
-    _set_dtld_seed)
+    _set_dtld_seed, pearson_correlation)
 
 
 # Baseline Shapley
@@ -132,7 +131,8 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
     bsl_shap_ /= n_x_0 * n_iter
     # Check baseline Shapley error
     if check_error:
-        print(f'error: {np.sum(bsl_shap_) - y_r + y_0}')
+        bsl_shap_sum = np.sum(bsl_shap_)
+        print(f'error y_idx={y_idx[0]}: {(bsl_shap_sum - y_r + y_0)[0]:>9.6f}')
     return y_0, y_r, bsl_shap_
 
 
@@ -234,7 +234,7 @@ def bsl_shap_corr(forward_func, dtld_func, x_size, y_size, y_idx=None,
         y, y_0, y_r, bsl_shap_ = y[:, 0], y_0[:, 0], y_r[:, 0], bsl_shap_[:, 0]
         # Compute output correlation
         if check_error:
-            corr[i] += pearsonr(y_r, y)[0]
+            corr[i] += pearson_correlation(y_r, y)
         # Compute baseline Shapley correlation
         mu_y, std_y, std_y_r = np.mean(y), np.std(y), np.std(y_r)
         bsl_shap_corr_i = np.mean(
@@ -245,5 +245,6 @@ def bsl_shap_corr(forward_func, dtld_func, x_size, y_size, y_idx=None,
     # Check baseline Shapley correlation error
     if check_error:
         bsc_sum = np.sum(np.reshape(bsl_shap_corr_, (n_y_idx, -1)), axis=1)
-        print(f'error : {bsc_sum - corr}')
+        for i, j in enumerate(y_idx):
+            print(f'error y_idx={j}: {bsc_sum[i] - corr[i]:>9.6f}')
     return bsl_shap_corr_
