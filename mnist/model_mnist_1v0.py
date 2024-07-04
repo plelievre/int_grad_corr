@@ -17,8 +17,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from mnist.mnist import MNIST
 from torchutils import (
-    AbstractModel, PMish, init_linear, init_conv, set_dtld_seed,
-    set_worker_seed)
+    AbstractModel, PMish, freeze_network, init_linear, init_conv,
+    set_dtld_seed, set_worker_seed)
 from igc import grad, int_grad, int_grad_corr, bsl_shap, bsl_shap_corr
 
 
@@ -187,6 +187,14 @@ class MultiConvLin(nn.Module):
         # Misc
         self.dropout = nn.Dropout(dropout)
         self.dropout_2d = nn.Dropout2d(dropout)
+
+    def freeze(self):
+        for param in self.parameters():
+            param.requires_grad_(False)
+
+    def unfreeze(self):
+        for param in self.parameters():
+            param.requires_grad_(True)
 
     def forward(self, x):
         x = self.dropout(x)
@@ -363,6 +371,7 @@ class Model(AbstractModel):
         prob.backward(gradient=torch.ones_like(prob))
         return prob.squeeze(dim=1).detach().cpu().numpy(), x.grad.cpu().numpy()
 
+    @freeze_network
     def grad_x(self, x, y_idx=None, x_batch_size=1, checkpoint='best'):
         grad_kwargs = {'checkpoint': checkpoint}
         _, _, p_r, grad_ = grad(
@@ -371,6 +380,7 @@ class Model(AbstractModel):
             grad_kwargs=grad_kwargs)
         return p_r, grad_
 
+    @freeze_network
     def grad_val(self, n_x=None, y_idx=None, x_batch_size=1, x_seed=None,
                  checkpoint='best'):
         x_size = (self.dtst.img_size, self.dtst.img_size)
@@ -381,6 +391,7 @@ class Model(AbstractModel):
             grad_kwargs=grad_kwargs)
         return x, y, p_r, grad_
 
+    @freeze_network
     def int_grad_x(self, x, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
                    x_0_batch_size=None, x_0_seed=100, check_error=False,
                    checkpoint='best'):
@@ -393,6 +404,7 @@ class Model(AbstractModel):
             check_error=check_error)
         return p_0, p_r, int_grad_
 
+    @freeze_network
     def int_grad_val(self, n_x=None, y_idx=None, x_0=32, n_steps=32,
                      x_batch_size=1, x_0_batch_size=None, x_seed=None,
                      x_0_seed=100, check_error=False, checkpoint='best'):
@@ -405,6 +417,7 @@ class Model(AbstractModel):
             check_error=check_error)
         return x, y, p_0, p_r, int_grad_
 
+    @freeze_network
     def int_grad_corr_val(self, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
                           x_0_batch_size=None, x_0_seed=100, save_results=True,
                           check_error=False, checkpoint='best', suffix=''):

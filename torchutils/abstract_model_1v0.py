@@ -19,6 +19,52 @@ import torch
 import numpy as np
 
 
+# Utils
+
+
+def get_checkpoint_data(saves_path, checkpoint, training, current_epoch,
+                        device):
+    if checkpoint is None:
+        return None
+    assert checkpoint in ('last', 'best') or isinstance(checkpoint, int), (
+        "Checkpoint must be 'last', 'best', or an integer.")
+    checkpoints = []
+    for f in sorted(os.listdir(saves_path)):
+        if os.path.isfile(os.path.join(saves_path, f)):
+            f_split = f.split('-')
+            if f_split[0] == 'checkpoint':
+                checkpoints.append(int(f_split[-1]))
+    if training and not checkpoints:
+        return None
+    if not checkpoints:
+        raise ValueError('No checkpoint to restore.')
+    if checkpoint == 'last':
+        checkpoint = checkpoints[-1]
+    elif checkpoint == 'best':
+        checkpoint_data = torch.load(os.path.join(
+                saves_path, f'checkpoint-{checkpoints[-1]:04d}'),
+            map_location=torch.device('cpu'))
+        checkpoint = checkpoint_data['best_epoch']
+    if checkpoint != current_epoch:
+        if checkpoint not in checkpoints:
+            raise ValueError(
+                f'Checkpoint {checkpoint:04d} does not exist.')
+        checkpoint_data = torch.load(
+            os.path.join(saves_path, f'checkpoint-{checkpoint:04d}'),
+            map_location=device)
+        return checkpoint_data
+    return None
+
+
+def freeze_network(func):
+    def wrapper(*args, **kwargs):
+        args[0].network.freeze()
+        res = func(*args, **kwargs)
+        args[0].network.unfreeze()
+        return res
+    return wrapper
+
+
 # Abstract model
 
 
@@ -104,6 +150,7 @@ class AbstractModel:
             results_path, self.model_name + self.model_name_suffix)
         if not os.path.isdir(self.results_path):
             os.mkdir(self.results_path)
+        return self
 
     def set_seed(self, seed=None):
         """
@@ -113,6 +160,7 @@ class AbstractModel:
         if seed is not None:
             torch.manual_seed(seed)
             self.rng = np.random.default_rng(seed)
+        return self
 
     def save(self, val_acc):
         """
@@ -142,6 +190,7 @@ class AbstractModel:
         if self.scheduler is not None:
             state_training.update({'scheduler': self.scheduler.state_dict()})
         torch.save(state_training, checkpoint_training_path)
+        return self
 
     def clean_saves(self):
         """
@@ -172,40 +221,9 @@ class AbstractModel:
                     self.saves_path, f'checkpoint_training-{checkpoint:04d}')
                 if os.path.isfile(checkpoint_training_path):
                     os.remove(checkpoint_training_path)
+        return self
 
-    def _get_checkpoint_data(self, checkpoint=None, training=False):
-        if checkpoint is None:
-            return None
-        assert checkpoint in ('last', 'best') or isinstance(checkpoint, int), (
-            "Checkpoint must be 'last', 'best', or an integer.")
-        checkpoints = []
-        for f in sorted(os.listdir(self.saves_path)):
-            if os.path.isfile(os.path.join(self.saves_path, f)):
-                f_split = f.split('-')
-                if f_split[0] == 'checkpoint':
-                    checkpoints.append(int(f_split[-1]))
-        if training and not checkpoints:
-            return None
-        if not checkpoints:
-            raise ValueError('No checkpoint to restore.')
-        if checkpoint == 'last':
-            checkpoint = checkpoints[-1]
-        elif checkpoint == 'best':
-            checkpoint_data = torch.load(os.path.join(
-                    self.saves_path, f'checkpoint-{checkpoints[-1]:04d}'),
-                map_location=torch.device('cpu'))
-            checkpoint = checkpoint_data['best_epoch']
-        if checkpoint != self.current_epoch:
-            if checkpoint not in checkpoints:
-                raise ValueError(
-                    f'Checkpoint {checkpoint:04d} does not exist.')
-            checkpoint_data = torch.load(
-                os.path.join(self.saves_path, f'checkpoint-{checkpoint:04d}'),
-                map_location=self.device)
-            return checkpoint_data
-        return None
-
-    def restore(self, checkpoint=None, training=False):
+    def restore(self, checkpoint=None, training=False, strict=True):
         """
         Restore a particular checkpoint. Checkpoint can be:
             - best checkpoint ('best')
@@ -213,15 +231,17 @@ class AbstractModel:
             - a specific checkpoint (int)
         If training is True, optimizer and scheduler parameters are restored.
         """
-        checkpoint_data = self._get_checkpoint_data(checkpoint, training)
+        checkpoint_data = get_checkpoint_data(
+            self.saves_path, checkpoint, training, self.current_epoch,
+            self.device)
         if checkpoint_data is None:
-            return
+            return self
         self.current_epoch = checkpoint_data['epoch']
         self.current_step = checkpoint_data['step']
         self.best_epoch = checkpoint_data['best_epoch']
         self.best_val_acc = checkpoint_data['best_val_acc']
-        self.network.load_state_dict(checkpoint_data['state_dict'])
-        if self.optimizer is not None:
+        self.network.load_state_dict(checkpoint_data['state_dict'], strict)
+        if training and self.optimizer is not None:
             checkpoint = checkpoint_data['epoch']
             checkpoint_training_path = os.path.join(
                 self.saves_path, f'checkpoint_training-{checkpoint:04d}')
@@ -230,11 +250,12 @@ class AbstractModel:
                 map_location=self.device)
             self.optimizer.load_state_dict(
                 checkpoint_training_data['optimizer'])
-        if self.scheduler is not None:
+        if training and self.scheduler is not None:
             self.scheduler.load_state_dict(
                 checkpoint_training_data['scheduler'])
         print(f'Restored checkpoint: {self.current_epoch} '
               f'(best: {self.best_epoch})')
+        return self
 
     def get_result_path(self, name):
         """
