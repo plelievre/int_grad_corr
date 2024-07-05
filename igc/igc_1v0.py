@@ -23,7 +23,7 @@ class _Dataset(TorchDataset):
 
     def __getitem__(self, idx):
         x_i = self.x[idx]
-        y_i = self.x[idx]
+        y_i = self.y[idx]
         # Use self.rng for data augmentation. Caution, self.rng may be None.
         return x_i, y_i
 
