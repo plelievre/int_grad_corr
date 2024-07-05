@@ -4,7 +4,9 @@ Baseline Shapley Correlation (BSC) utils.
 For optimization purposes, dataloader 'dtld_func' and gradient 'forward_func'
 functions require some specific patterns. See below for generic examples.
 
+
 ———————— dtld_func
+
 
 import torch
 from torch.utils.data import DataLoader, Dataset as TorchDataset
@@ -35,12 +37,18 @@ class Dataset:
 
     @torch.no_grad()
     def dtld_func(self, batch_size, seed=None):
+        if seed is None:
+            return DataLoader(
+                _Dataset(self.x, self.y),
+                batch_size=batch_size, shuffle=False)
         return DataLoader(
             _Dataset(self.x, self.y, seed),
             batch_size=batch_size, shuffle=True,
             generator=torch.Generator().manual_seed(seed))
 
+
 ———————— forward_func
+
 
 import torch
 from torch import nn
@@ -58,6 +66,10 @@ class Model:
         y_r = self.module(x)
         y_r = torch.gather(y_r, dim=1, index=y_idx.unsqueeze(dim=1))
         return y_r.squeeze(dim=1).cpu().numpy()
+
+
+————————
+
 
 Author: Pierre Lelievre
 """

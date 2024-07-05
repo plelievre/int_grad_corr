@@ -4,7 +4,9 @@ Integrated Gradient Correlation (IGC) utils.
 For optimization purposes, dataloader 'dtld_func' and gradient 'grad_func'
 functions require specific patterns. See below for generic examples.
 
+
 ———————— dtld_func
+
 
 import torch
 from torch.utils.data import DataLoader, Dataset as TorchDataset
@@ -35,12 +37,18 @@ class Dataset:
 
     @torch.no_grad()
     def dtld_func(self, batch_size, seed=None):
+        if seed is None:
+            return DataLoader(
+                _Dataset(self.x, self.y),
+                batch_size=batch_size, shuffle=False)
         return DataLoader(
             _Dataset(self.x, self.y, seed),
             batch_size=batch_size, shuffle=True,
             generator=torch.Generator().manual_seed(seed))
 
+
 ———————— grad_func
+
 
 import torch
 from torch import nn
@@ -62,7 +70,9 @@ class Model:
         y_r.backward(gradient=torch.ones_like(y_r))
         return y_r.squeeze(dim=1).detach().cpu().numpy(), x.grad.cpu().numpy()
 
+
 ————————
+
 
 Author: Pierre Lelievre
 """
