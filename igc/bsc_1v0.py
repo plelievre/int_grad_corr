@@ -110,12 +110,14 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
         # Break when n_x_0_batch is reached
         if i == n_x_0_batch:
             break
+        # Prepare baseline
+        x_0_i = x_0_i.to(device)
         # Compute y_0_i
         y_0_i = forward_func(
             x=x_0_i, y_idx=y_idx[:x_0_batch_size], **forward_kwargs)
         y_0 += np.sum(y_0_i)
         # Prepare baseline
-        x_0_i = x_0_i.repeat(*repeat_iter).to(device)
+        x_0_i = x_0_i.repeat(*repeat_iter)
         # Prepare permutations
         rng = np.random.default_rng(int(perm_seed+1e3*(i+1)))
         feature_mask = np.arange(
@@ -126,7 +128,7 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
         feature_permutation = torch.as_tensor(
             rng.permuted(feature_mask, axis=1), device=device)
         for j in range(n_features):
-            mask_j = nn.functional.one_hot(
+            mask_j = nn.functional.one_hot(  # pylint: disable=E1102
                 feature_permutation[:, j], num_classes=n_features)
             mask_j = mask_j.view(x.size())
             mask += mask_j
@@ -144,12 +146,12 @@ def _bsl_shap_1_x_1_y(forward_func, x, y_idx, x_0_dtld, n_iter, n_x_0_batch,
     # Check baseline Shapley error
     if check_error:
         bsl_shap_sum = np.sum(bsl_shap_)
-        print(f'error y_idx={y_idx[0]}: {(bsl_shap_sum - y_r + y_0)[0]:>9.6f}')
+        print(f'error y_idx={y_idx[0]}: {(bsl_shap_sum - y_r + y_0):>9.6f}')
     return y_0, y_r, bsl_shap_
 
 
 @torch.no_grad()
-def bsl_shap(forward_func, x=None, y_idx=None, x_0=None, n_iter=32,
+def bsl_shap(forward_func, x=None, y_idx=None, x_0=None, n_iter=8,
              x_size=None, y_size=None, dtld_func=None, x_0_batch_size=None,
              x_seed=None, x_0_seed=100, dtype=torch.float32, device='cpu',
              dtld_kwargs=None, forward_kwargs=None, check_error=False,
@@ -212,7 +214,7 @@ def bsl_shap(forward_func, x=None, y_idx=None, x_0=None, n_iter=32,
 
 @torch.no_grad()
 def bsl_shap_corr(forward_func, dtld_func, x_size, y_size, y_idx=None,
-                  x_0=None, n_iter=32, x_0_batch_size=None, x_0_seed=100,
+                  x_0=None, n_iter=8, x_0_batch_size=None, x_0_seed=100,
                   dtype=torch.float32, device='cpu', dtld_kwargs=None,
                   forward_kwargs=None, check_error=False, n_x=None):
     """

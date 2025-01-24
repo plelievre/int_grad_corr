@@ -20,19 +20,21 @@ mpl.rcParams['legend.fontsize'] = 'small'
 # Utils
 
 
+# Not working with mpl 3.10.0
 def filter_contour(contour, threshold=1.0):
-    for cc in contour.collections:
-        for pp in cc.get_paths():
-            mask = np.ones(len(pp.vertices), dtype=np.bool_)
-            i = 0
-            for poly in pp.to_polygons():
-                n = len(poly)
-                diameter = np.sum(np.linalg.norm(poly, axis=1))
-                if diameter < threshold:
-                    mask[i:i+n] &= False
-                i += n
-            pp.vertices = pp.vertices[mask]
-            pp.codes = pp.codes[mask]
+    # for cc in contour.collections:
+    #     for pp in cc.get_paths():
+    #         mask = np.ones(len(pp.vertices), dtype=np.bool_)
+    #         i = 0
+    #         for poly in pp.to_polygons():
+    #             n = len(poly)
+    #             diameter = np.sum(np.linalg.norm(poly, axis=1))
+    #             if diameter < threshold:
+    #                 mask[i:i+n] &= False
+    #             i += n
+    #         pp.vertices = pp.vertices[mask]
+    #         pp.codes = pp.codes[mask]
+    return contour
 
 
 # Figures
@@ -52,7 +54,7 @@ def mnist_img(x, contour_m=None, contour_p=None):
     tick_labels = None
     if v_max_tick <= 0.0001:
         tick_labels = [f'{i:.0e}' for i in ticks]
-    blue_color = mpl.colormaps['RdBu_r'](0.0)
+    blue_color = mpl.colormaps['RdBu_r'](0.25)
     if (contour_m is not None) or (contour_p is not None):
         xx, yy = np.meshgrid(np.arange(28), np.arange(28))
     for i in range(10):
@@ -134,17 +136,20 @@ def mnist_img_10(x, contour_m=None, digits=None):
 
 
 def mnist_plot(inside, outside, low, high):
+    # Get figure and colors
     fig, (ax1, ax2) = plt.subplots(
         1, 2, figsize=(6, 2), dpi=300, gridspec_kw = {
-            'top': 0.96, 'bottom': 0.09, 'left':0.10, 'right': 0.99,
+            'top': 0.96, 'bottom': 0.09, 'left':0.085, 'right': 0.99,
             'wspace': 0.2})
     colors = mpl.colormaps['RdBu_r']
+    # Get number of image statistics
     n_rois = 10
     n_imst = 2
     n_imst_f = float(n_imst)
+    # Define plot type variables
     ax1_ylim = (0.0, 1.0)
     ax1_nticks = 5
-    ax1_label = 'integrated gradient\ncorrelation'
+    ax1_label = 'IGC attributions'
     ax2_ylim = (0.0, 1.0)
     ax2_nticks = 5
     legend_loc = 'upper right'

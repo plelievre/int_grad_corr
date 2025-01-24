@@ -42,6 +42,7 @@ class Dataset:
 Author: Pierre Lelievre
 """
 
+import os
 import torch
 
 
@@ -57,10 +58,18 @@ def set_dtld_seed(dtld, seed):
         dtld.dataset.rng.manual_seed(seed)
 
 
+def fix_cpu_affinity(worker_id):  # pylint: disable=W0613
+    """
+    Fix CPU affinity.
+    """
+    os.sched_setaffinity(0, range(os.cpu_count()))  # pylint: disable=E1101
+
+
 def set_worker_seed(worker_id):
     """
     Set seeds of dataloader's workers.
     """
+    fix_cpu_affinity(worker_id)
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
     dataset.rng.manual_seed(dataset.rng.initial_seed() + int(1e6*worker_id))

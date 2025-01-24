@@ -9,9 +9,14 @@ dependencies:
     # Sciences
     - numpy
     - matplotlib
+    - scikit-learn
     # Neural Networks
-    - pytorch::pytorch=2.1
-    - pytorch::pytorch-cuda=12.1
+    - pytorch::pytorch=2.4
+    - pytorch::pytorch-cuda=12.4
+    - pytorch::torchvision
     - tensorboard
+    # Image
+    - pillow
     # Others
+    - h5py
     - tqdm

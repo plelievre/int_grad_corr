@@ -4,6 +4,7 @@ Utils to initialize module weights.
 Author: Pierre Lelievre
 """
 
+import math
 from torch import nn
 
 
@@ -20,10 +21,18 @@ def init_linear(layer, init_gain_act='linear', kaiming_args=None,
         nn.init.kaiming_normal_(
             layer.weight, a=kaiming_args[0], mode=kaiming_args[1],
             nonlinearity=init_gain_act)
+    elif isinstance(init_gain_act, float):
+        nn.init.trunc_normal_(layer.weight, std=init_gain_act)
     else:
         nn.init.xavier_normal_(
             layer.weight, gain=nn.init.calculate_gain(init_gain_act))
-    if layer.bias is not None:
+    if init_bias == 'uniform' and layer.bias is not None:
+        # Default pytorch init for bias
+        # pylint: disable=W0212
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(layer.weight)
+        bound = 1.0 / math.sqrt(fan_in) if fan_in > 0 else 0
+        nn.init.uniform_(layer.bias, -bound, bound)
+    elif layer.bias is not None:
         nn.init.constant_(layer.bias, init_bias)
 
 

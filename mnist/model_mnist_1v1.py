@@ -17,9 +17,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 from mnist.mnist import MNIST
 from torchutils import (
-    AbstractModel, PMish, freeze_network, init_linear, init_conv,
-    set_dtld_seed, set_worker_seed)
-from igc import grad, int_grad, int_grad_corr, bsl_shap, bsl_shap_corr
+    AbstractModel, LinearBlock, Conv2dBlock, freeze_network, init_linear,
+    set_dtld_seed, set_worker_seed, fix_cpu_affinity)
+from igc import grad, int_grad, int_grad_corr, igc_error
+from igc.bsc_1v0 import bsl_shap, bsl_shap_corr
 
 
 # Dataset
@@ -40,11 +41,13 @@ class _Dataset(TorchDataset):
     def __getitem__(self, idx):
         image = torch.tensor(self.images[idx], dtype=torch.float32)
         label = torch.tensor(self.labels[idx], dtype=torch.int64)
-        return image, nn.functional.one_hot(label, self.n_digits)
+        return image, nn.functional.one_hot(  # pylint: disable=E1102
+            label, self.n_digits)
 
 
 class Dataset:
-    def __init__(self, invert_image_luminance=False):
+    def __init__(self):
+        # Load data
         self.mnist = MNIST()
         self.train_images = self.mnist.train_images
         self.val_images = self.mnist.test_images
@@ -57,10 +60,6 @@ class Dataset:
         self.train_images /= images_std
         self.val_images -= images_mean
         self.val_images /= images_std
-        # For experimental purposes invert image luminance
-        if invert_image_luminance:
-            self.train_images *= -1.0
-            self.val_images *= -1.0
         # Informations
         self.n_digits = self.mnist.n_digits
         self.n_train, self.img_size = self.train_images.shape[:2]
@@ -82,10 +81,12 @@ class Dataset:
         if seed is None:
             return DataLoader(
                 _Dataset(self.val_images, self.val_labels, self.n_digits),
-                batch_size=batch_size, shuffle=False, num_workers=num_workers)
+                batch_size=batch_size, shuffle=False, num_workers=num_workers,
+                worker_init_fn=fix_cpu_affinity)
         return DataLoader(
             _Dataset(self.val_images, self.val_labels, self.n_digits),
             batch_size=batch_size, shuffle=True, num_workers=num_workers,
+            worker_init_fn=fix_cpu_affinity,
             generator=torch.Generator().manual_seed(seed))
 
     def compute_mean_digits(self):
@@ -129,64 +130,36 @@ class Dataset:
 # Modules
 
 
-def act_sel_init(act_type, layer):
-    if isinstance(layer, nn.Linear):
-        init_fn = init_linear
-    else:
-        init_fn = init_conv
-    if act_type in ('relu', 'mish'):
-        init_fn(layer, init_gain_act='relu')
-    elif act_type == 'pmish':
-        init_fn(
-            layer, init_gain_act='leaky_relu', kaiming_args=(0.5, 'fan_in'))
-    if act_type == 'mish':
-        return nn.Mish()
-    if act_type == 'pmish':
-        return PMish(init=0.0)
-    return nn.ReLU()
-
-
 class MultiConvLin(nn.Module):
     def __init__(self, img_size, n_digits, conv_sizes, lin_sizes, dropout=0.2,
-                 dropout_min_size=16, act_type='relu'):
-        assert act_type in ('relu', 'mish', 'pmish')
+                 dropout_min_size=16, act_type='mish'):
         super().__init__()
-        self.img_size = img_size
         self.n_digits = n_digits
-        self.conv_sizes = conv_sizes
+        # Convolution block
         if conv_sizes is None:
-            self.conv_sizes = tuple()
-        conv_out_size = self.img_size
-        for _ in range(len(self.conv_sizes)):
-            conv_out_size = int(0.5*(conv_out_size - 3) + 1)
-        self.conv_sizes = (1,) + self.conv_sizes
-        self.lin_sizes = (conv_out_size**2 * self.conv_sizes[-1],) + lin_sizes
-        self.dropout_min_size = dropout_min_size
-        # Convolution layers
-        if len(self.conv_sizes) > 1:
-            for i, (size_in, size_out) in enumerate(
-                    zip(self.conv_sizes[:-1], self.conv_sizes[1:])):
-                conv = nn.Conv2d(
-                    size_in, size_out, kernel_size=3, stride=2, bias=False)
-                act = act_sel_init(act_type, conv)
-                setattr(self, f'conv_{i}', conv)
-                setattr(self, f'c_bn_{i}', nn.BatchNorm2d(size_out))
-                setattr(self, f'c_act_{i}', act)
-        # Linear layers
-        for i, (size_in, size_out) in enumerate(
-                zip(self.lin_sizes[:-1], self.lin_sizes[1:])):
-            lin = nn.Linear(size_in, size_out, bias=False)
-            act = act_sel_init(act_type, lin)
-            setattr(self, f'lin_{i}', lin)
-            setattr(self, f'bn_{i}', nn.BatchNorm1d(size_out))
-            setattr(self, f'act_{i}', act)
+            conv_sizes = tuple()
+        conv_out_hw = img_size
+        for _ in range(len(conv_sizes)):
+            conv_out_hw = int(0.5*(conv_out_hw - 3) + 1)
+        conv_sizes = (1,) + conv_sizes
+        self.conv = None
+        if len(conv_sizes) > 1:
+            self.conv = Conv2dBlock(
+                conv_sizes, dropout=dropout, dropout_min_size=dropout_min_size,
+                act_type=act_type)
+        # Linear block
+        if lin_sizes is None:
+            lin_sizes = tuple()
+        lin_sizes = (conv_out_hw**2 * conv_sizes[-1],) + lin_sizes
+        self.lin = None
+        if len(lin_sizes) > 1:
+            self.lin = LinearBlock(
+                lin_sizes, dropout, dropout_min_size, act_type)
         # Output layer
-        self.lin_out = nn.Linear(
-            self.lin_sizes[-1], self.n_digits, bias=False)
+        self.lin_out = nn.Linear(lin_sizes[-1], self.n_digits, bias=False)
         init_linear(self.lin_out, init_gain_act='linear')
         # Misc
         self.dropout = nn.Dropout(dropout)
-        self.dropout_2d = nn.Dropout2d(dropout)
 
     def freeze(self):
         for param in self.parameters():
@@ -198,29 +171,22 @@ class MultiConvLin(nn.Module):
 
     def forward(self, x):
         x = self.dropout(x)
-        # Convolution layers
         x = x.unsqueeze(dim=1)
-        for i, layer_size in enumerate(self.conv_sizes[1:]):
-            x = getattr(self, f'conv_{i}')(x)
-            x = getattr(self, f'c_bn_{i}')(x)
-            x = getattr(self, f'c_act_{i}')(x)
-            if layer_size >= self.dropout_min_size:
-                x = self.dropout_2d(x)
-        # Linear layers
+        # Convolution block
+        if self.conv is not None:
+            x = self.conv(x)
+        # Linear block
         x = x.flatten(start_dim=1)
-        for i, layer_size in enumerate(self.lin_sizes[1:]):
-            x = getattr(self, f'lin_{i}')(x)
-            x = getattr(self, f'bn_{i}')(x)
-            x = getattr(self, f'act_{i}')(x)
-            if layer_size >= self.dropout_min_size:
-                x = self.dropout(x)
+        if self.lin is not None:
+            x = self.lin(x)
         # Output layer
         x = self.lin_out(x)
         return nn.functional.log_softmax(x, dim=1)
 
     def get_y_r(self, log_p):
         label = torch.argmax(log_p, dim=1)
-        return nn.functional.one_hot(label, self.n_digits)
+        return nn.functional.one_hot(  # pylint: disable=E1102
+            label, self.n_digits)
 
     def nll_loss(self, log_p, y):
         return -1.0 * torch.sum(log_p * y)
@@ -237,25 +203,25 @@ class Model(AbstractModel):
     conv_sizes = (64, 128)
     lin_sizes = (128, 64, 32, 16)
     dropout = 0.2
-    act_type = 'relu'
+    dropout_min_size = 16
+    act_type = 'mish'
     learning_rate = 1e-5
     scheduler_decay = 0.9
     scheduler_patience = 4
     scheduler_min_lr = 1e-6
     save_every_n_epoch = 1
     maximum_saves = 1
-    summary_every_n_step = 0
     seed = 100
     dtype = torch.float32
     project_path = os.path.dirname(__file__)
-    def __init__(self, dataset, model_name='mnist_1v0', trainable=False,
+    def __init__(self, dataset, model_name='mnist_1v1', trainable=False,
                  device=None, parameters=None):
         self.dtst = dataset
         super().__init__(model_name, device, parameters)
         # Network
         self.network = MultiConvLin(
             self.dtst.img_size, self.dtst.n_digits, self.conv_sizes,
-            self.lin_sizes, self.dropout, act_type=self.act_type)
+            self.lin_sizes, self.dropout, self.dropout_min_size, self.act_type)
         self.network.to(self.device)
         # Optimizer
         self.optimizer, self.scheduler = None, None
@@ -295,12 +261,7 @@ class Model(AbstractModel):
                 self.optimizer.step()
                 # Summary
                 train_nll_avg += nll_loss.item()
-                if self.summary_every_n_step and not (
-                        self.current_step % self.summary_every_n_step):
-                    writer.add_scalar(
-                        'train/nll_loss_step', nll_loss.item() / len(x),
-                        self.current_step)
-            train_nll_avg /= float(self.dtst.n_train)
+            train_nll_avg /= float(len(train_dtld) * batch_size)
             writer.add_scalar(
                 'train/nll_loss', train_nll_avg, self.current_epoch)
             # Validation ######################################################
@@ -357,82 +318,132 @@ class Model(AbstractModel):
         val_ac_avg /= float(self.dtst.n_val)
         return val_nll_avg, val_ac_avg
 
-    def _grad(self, x, y_idx, checkpoint='best'):
+    def _fwd(self, x, checkpoint='best'):
         # Restore
         self.restore(checkpoint)
         # Prepare x
         x.requires_grad_(True)
         # Prepare model
         self.network.eval()
+        # Eval
+        y_r = torch.exp(self.network(x))  # log_prob to prob
+        return y_r
+
+    def _bwd(self, x, y_r, y_idx):
+        # Reset gradients
+        if x.grad is not None:
+            x.grad = None
         self.network.zero_grad(set_to_none=True)
-        # Eval and backprop
-        prob = torch.exp(self.network(x))
-        prob = torch.gather(prob, dim=1, index=y_idx.unsqueeze(dim=1))
-        prob.backward(gradient=torch.ones_like(prob))
-        return prob.squeeze(dim=1).detach().cpu().numpy(), x.grad.cpu().numpy()
+        # Compute gradients
+        y_r_ = torch.gather(y_r, dim=1, index=y_idx.unsqueeze(dim=1))
+        y_r_.backward(gradient=torch.ones_like(y_r_), retain_graph=True)
+        return y_r_.squeeze(dim=1).detach().cpu().numpy(), x.grad.cpu().numpy()
 
-    @freeze_network
-    def grad_x(self, x, y_idx=None, x_batch_size=1, checkpoint='best'):
-        grad_kwargs = {'checkpoint': checkpoint}
-        _, _, p_r, grad_ = grad(
-            self._grad, x, y_idx, y_size=self.dtst.n_digits,
-            x_batch_size=x_batch_size, dtype=self.dtype, device=self.device,
-            grad_kwargs=grad_kwargs)
-        return p_r, grad_
-
-    @freeze_network
-    def grad_val(self, n_x=None, y_idx=None, x_batch_size=1, x_seed=None,
-                 checkpoint='best'):
+    def _igc_params(self, checkpoint, num_workers=0):
         x_size = (self.dtst.img_size, self.dtst.img_size)
-        grad_kwargs = {'checkpoint': checkpoint}
-        x, y, p_r, grad_ = grad(
-            self._grad, n_x, y_idx, x_size, self.dtst.n_digits,
-            self.dtst.val_dtld, x_batch_size, x_seed, self.dtype, self.device,
-            grad_kwargs=grad_kwargs)
-        return x, y, p_r, grad_
+        y_size = self.dtst.n_digits
+        dtld_func = self.dtst.val_dtld
+        dtld_kwargs = {'num_workers': num_workers}
+        fwd_kwargs = {'checkpoint': checkpoint}
+        return x_size, y_size, dtld_func, dtld_kwargs, fwd_kwargs
+
+    def _igc_format(self, igc_, batched=False):
+        if batched:
+            return igc_
+        return igc_
 
     @freeze_network
-    def int_grad_x(self, x, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
-                   x_0_batch_size=None, x_0_seed=100, check_error=False,
-                   checkpoint='best'):
-        grad_kwargs = {'checkpoint': checkpoint}
-        _, _, p_0, p_r, int_grad_ = int_grad(
-            self._grad, x, y_idx, x_0, n_steps, y_size=self.dtst.n_digits,
-            dtld_func=self.dtst.val_dtld, x_batch_size=x_batch_size,
-            x_0_batch_size=x_0_batch_size, x_0_seed=x_0_seed, dtype=self.dtype,
-            device=self.device, grad_kwargs=grad_kwargs,
+    def grad_x(self, x, y_idx=None, x_batch_size=1, y_batch_size=None,
+               checkpoint='best', num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        _, _, y_r, grad_ = grad(
+            self._fwd, self._bwd, x, y_idx, x_size, y_size,
+            dtld_func=dtld_func, x_batch_size=x_batch_size,
+            y_batch_size=y_batch_size, dtype=self.dtype, device=self.device,
+            dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw)
+        return y_r, self._igc_format(grad_, batched=True)
+
+    @freeze_network
+    def grad(self, n_x=None, y_idx=None, x_batch_size=1, y_batch_size=None,
+             x_seed=None, checkpoint='best', num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        x, y, y_r, grad_ = grad(
+            self._fwd, self._bwd, n_x, y_idx, x_size, y_size,
+            dtld_func=dtld_func, x_batch_size=x_batch_size,
+            y_batch_size=y_batch_size, x_seed=x_seed, dtype=self.dtype,
+            device=self.device, dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw)
+        return x, y, y_r, self._igc_format(grad_, batched=True)
+
+    @freeze_network
+    def int_grad_x(self, x, x_0=32, y_idx=None, n_steps=32, x_batch_size=1,
+                   x_0_batch_size=1, y_batch_size=None, x_0_seed=100,
+                   check_error=False, checkpoint='best', num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        _, _, y_0, y_r, int_grad_ = int_grad(
+            self._fwd, self._bwd, x, x_0, y_idx, n_steps, x_size, y_size,
+            dtld_func=dtld_func, x_batch_size=x_batch_size,
+            x_0_batch_size=x_0_batch_size, y_batch_size=y_batch_size,
+            x_0_seed=x_0_seed, dtype=self.dtype, device=self.device,
+            dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw, check_error=check_error)
+        return y_0, y_r, self._igc_format(int_grad_, batched=True)
+
+    @freeze_network
+    def int_grad(self, n_x=None, x_0=8, y_idx=None, n_steps=64, x_batch_size=1,
+                 x_0_batch_size=1, y_batch_size=None, x_seed=None,
+                 x_0_seed=100, check_error=False, checkpoint='best',
+                 num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        x, y, y_0, y_r, int_grad_ = int_grad(
+            self._fwd, self._bwd, n_x, x_0, y_idx, n_steps, x_size, y_size,
+            dtld_func=dtld_func, x_batch_size=x_batch_size,
+            x_0_batch_size=x_0_batch_size, y_batch_size=y_batch_size,
+            x_seed=x_seed, x_0_seed=x_0_seed, dtype=self.dtype,
+            device=self.device, dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw,
             check_error=check_error)
-        return p_0, p_r, int_grad_
+        return x, y, y_0, y_r, self._igc_format(int_grad_, batched=True)
 
     @freeze_network
-    def int_grad_val(self, n_x=None, y_idx=None, x_0=32, n_steps=32,
-                     x_batch_size=1, x_0_batch_size=None, x_seed=None,
-                     x_0_seed=100, check_error=False, checkpoint='best'):
-        x_size = (self.dtst.img_size, self.dtst.img_size)
-        grad_kwargs = {'checkpoint': checkpoint}
-        x, y, p_0, p_r, int_grad_ = int_grad(
-            self._grad, n_x, y_idx, x_0, n_steps, x_size, self.dtst.n_digits,
-            self.dtst.val_dtld, x_batch_size, x_0_batch_size, x_seed, x_0_seed,
-            self.dtype, self.device, grad_kwargs=grad_kwargs,
-            check_error=check_error)
-        return x, y, p_0, p_r, int_grad_
-
-    @freeze_network
-    def int_grad_corr_val(self, y_idx=None, x_0=32, n_steps=32, x_batch_size=1,
-                          x_0_batch_size=None, x_0_seed=100, save_results=True,
-                          check_error=False, checkpoint='best', suffix=''):
+    def int_grad_corr(self, x_0=8, y_idx=None, n_steps=64, x_batch_size=1,
+                      x_0_batch_size=1, y_batch_size=None, x_0_seed=100,
+                      save_results=True, check_error=False, checkpoint='best',
+                      suffix='', num_workers=0, n_x=None):
         if suffix:
             suffix = '_' + suffix
-        x_size = (self.dtst.img_size, self.dtst.img_size)
-        grad_kwargs = {'checkpoint': checkpoint}
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
         int_grad_corr_ = int_grad_corr(
-            self._grad, self.dtst.val_dtld, x_size, self.dtst.n_digits, y_idx,
-            x_0, n_steps, x_batch_size, x_0_batch_size, x_0_seed, self.dtype,
-            self.device, grad_kwargs=grad_kwargs, check_error=check_error)
+            self._fwd, self._bwd, dtld_func, x_0, y_idx, n_steps, x_size,
+            y_size, x_batch_size=x_batch_size, x_0_batch_size=x_0_batch_size,
+            y_batch_size=y_batch_size, x_0_seed=x_0_seed, dtype=self.dtype,
+            device=self.device, dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw,
+            check_error=check_error, n_x=n_x)
+        int_grad_corr_ = self._igc_format(int_grad_corr_)
+        # Save results
         if save_results:
-            np.save(self.get_result_path(
-                f'int_grad_corr{suffix}.npy'), int_grad_corr_)
+            np.savez(self.get_result_path(
+                f'int_grad_corr{suffix}.npz'), data=int_grad_corr_)
+        # Return results
         return int_grad_corr_
+
+    @torch.no_grad()
+    def igc_error(self, igc_name, y_idx=None, x_batch_size=1,
+                  checkpoint='best', num_workers=0):
+        # Load IGC data
+        igc = np.load(self.get_result_path(igc_name))['data']
+        # Restore
+        self.restore(checkpoint)
+        # Compute IGC error
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        error = igc_error(
+            igc, self._fwd, dtld_func, y_idx, x_size, y_size,
+            x_batch_size=x_batch_size, dtype=self.dtype, device=self.device,
+            dtld_kwargs=dtld_kw, fwd_kwargs=fwd_kw)
+        return error
 
     @torch.no_grad()
     def _forward(self, x, y_idx, checkpoint='best'):
@@ -441,51 +452,51 @@ class Model(AbstractModel):
         # Prepare model
         self.network.eval()
         # Eval
-        prob = torch.exp(self.network(x))
-        prob = torch.gather(prob, dim=1, index=y_idx.unsqueeze(dim=1))
-        return prob.squeeze(dim=1).cpu().numpy()
+        y_r = torch.exp(self.network(x))  # log_prob to prob
+        y_r = torch.gather(y_r, dim=1, index=y_idx.unsqueeze(dim=1))
+        return y_r.squeeze(dim=1).cpu().numpy()
 
     @torch.no_grad()
     def bsl_shap_x(self, x, y_idx=None, x_0=32, n_iter=32, x_0_batch_size=None,
-                   x_0_seed=100, check_error=False, checkpoint='best'):
-        forward_kwargs = {'checkpoint': checkpoint}
-        _, _, p_0, p_r, bsl_shap_ = bsl_shap(
-            self._forward, x, y_idx, x_0, n_iter, y_size=self.dtst.n_digits,
-            dtld_func=self.dtst.val_dtld, x_0_batch_size=x_0_batch_size,
-            x_0_seed=x_0_seed, dtype=self.dtype, device=self.device,
-            forward_kwargs=forward_kwargs, check_error=check_error)
-        return p_0, p_r, bsl_shap_
-
-    @torch.no_grad()
-    def bsl_shap_val(self, n_x=None, y_idx=None, x_0=32, n_iter=32,
-                     x_0_batch_size=None, x_seed=None, x_0_seed=100,
-                     check_error=False, checkpoint='best'):
-        x_size = (self.dtst.img_size, self.dtst.img_size)
-        forward_kwargs = {'checkpoint': checkpoint}
-        x, y, p_0, p_r, bsl_shap_ = bsl_shap(
-            self._forward, n_x, y_idx, x_0, n_iter, x_size, self.dtst.n_digits,
-            self.dtst.val_dtld, x_0_batch_size, x_seed, x_0_seed,
-            self.dtype, self.device, forward_kwargs=forward_kwargs,
+                   x_0_seed=100, check_error=False, checkpoint='best',
+                   num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        _, _, y_0, y_r, bsl_shap_ = bsl_shap(
+            self._forward, x, y_idx, x_0, n_iter, x_size, y_size, dtld_func,
+            x_0_batch_size, x_0_seed=x_0_seed, dtype=self.dtype,
+            device=self.device, dtld_kwargs=dtld_kw, forward_kwargs=fwd_kw,
             check_error=check_error)
-        return x, y, p_0, p_r, bsl_shap_
+        return y_0, y_r, self._igc_format(bsl_shap_, batched=True)
 
     @torch.no_grad()
-    def bsl_shap_corr_val(self, y_idx=None, x_0=32, n_iter=32,
-                          x_0_batch_size=None, x_0_seed=100, save_results=True,
-                          check_error=False, checkpoint='best', suffix='',
-                          n_x=None):
+    def bsl_shap(self, n_x=None, x_0=8, y_idx=None, n_iter=8,
+                 x_0_batch_size=None, x_seed=None, x_0_seed=100,
+                 check_error=False, checkpoint='best', num_workers=0):
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
+        x, y, y_0, y_r, bsl_shap_ = bsl_shap(
+            self._forward, n_x, y_idx, x_0, n_iter, x_size, y_size, dtld_func,
+            x_0_batch_size, x_seed, x_0_seed, self.dtype, self.device, dtld_kw,
+            fwd_kw, check_error)
+        return x, y, y_0, y_r, self._igc_format(bsl_shap_, batched=True)
+
+    @torch.no_grad()
+    def bsl_shap_corr(self, x_0=8, y_idx=None, n_iter=8, x_0_batch_size=None,
+                      x_0_seed=100, save_results=True, check_error=False,
+                      checkpoint='best', suffix='', num_workers=0, n_x=None):
         if suffix:
             suffix = '_' + suffix
-        x_size = (self.dtst.img_size, self.dtst.img_size)
-        forward_kwargs = {'checkpoint': checkpoint}
+        x_size, y_size, dtld_func, dtld_kw, fwd_kw = self._igc_params(
+            checkpoint, num_workers)
         bsl_shap_corr_ = bsl_shap_corr(
-            self._forward, self.dtst.val_dtld, x_size, self.dtst.n_digits,
-            y_idx, x_0, n_iter, x_0_batch_size, x_0_seed, self.dtype,
-            self.device, forward_kwargs=forward_kwargs,
-            check_error=check_error, n_x=n_x)
+            self._forward, dtld_func, x_size, y_size, y_idx, x_0, n_iter,
+            x_0_batch_size, x_0_seed, self.dtype, self.device, dtld_kw, fwd_kw,
+            check_error, n_x)
+        bsl_shap_corr_ = self._igc_format(bsl_shap_corr_)
         # Save results
         if save_results:
-            np.save(self.get_result_path(
-                f'bsl_shap_corr{suffix}.npy'), bsl_shap_corr_)
+            np.savez(self.get_result_path(
+                f'bsl_shap_corr{suffix}.npz'), data=bsl_shap_corr_)
         # Return results
         return bsl_shap_corr_

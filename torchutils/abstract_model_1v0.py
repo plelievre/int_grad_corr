@@ -22,8 +22,17 @@ import numpy as np
 # Utils
 
 
+def get_checkpoint_path(saves_path, epoch, checkpoint_n_digits=4,
+                        training_checkpoint=False):
+    checkpoint_name = 'checkpoint'
+    if training_checkpoint:
+        checkpoint_name += '_training'
+    checkpoint_name = f'{checkpoint_name}-{epoch:0{checkpoint_n_digits}d}'
+    return os.path.join(saves_path, checkpoint_name)
+
+
 def get_checkpoint_data(saves_path, checkpoint, training, current_epoch,
-                        device):
+                        device, checkpoint_n_digits=4):
     if checkpoint is None:
         return None
     assert checkpoint in ('last', 'best') or isinstance(checkpoint, int), (
@@ -41,17 +50,19 @@ def get_checkpoint_data(saves_path, checkpoint, training, current_epoch,
     if checkpoint == 'last':
         checkpoint = checkpoints[-1]
     elif checkpoint == 'best':
-        checkpoint_data = torch.load(os.path.join(
-                saves_path, f'checkpoint-{checkpoints[-1]:04d}'),
-            map_location=torch.device('cpu'))
+        checkpoint_data = torch.load(
+            get_checkpoint_path(
+                saves_path, checkpoints[-1], checkpoint_n_digits),
+            map_location=torch.device('cpu'), weights_only=True)
         checkpoint = checkpoint_data['best_epoch']
     if checkpoint != current_epoch:
         if checkpoint not in checkpoints:
             raise ValueError(
-                f'Checkpoint {checkpoint:04d} does not exist.')
+                f'Checkpoint {checkpoint:0{checkpoint_n_digits}d}'
+                'does not exist.')
         checkpoint_data = torch.load(
-            os.path.join(saves_path, f'checkpoint-{checkpoint:04d}'),
-            map_location=device)
+            get_checkpoint_path(saves_path, checkpoint, checkpoint_n_digits),
+            map_location=device, weights_only=True)
         return checkpoint_data
     return None
 
@@ -75,6 +86,7 @@ class AbstractModel:
     seed = None
     dtype = torch.float32
     maximum_saves = 1
+    checkpoint_n_digits = 4
     ###########################################################################
     def __init__(self, model_name, device=None, parameters=None,
                  model_name_suffix='', enforce_determinisim=True):
@@ -162,17 +174,21 @@ class AbstractModel:
             self.rng = np.random.default_rng(seed)
         return self
 
-    def save(self, val_acc):
+    def checkpoint_path(self, epoch, training_checkpoint=False):
+        return get_checkpoint_path(
+            self.saves_path, epoch, self.checkpoint_n_digits,
+            training_checkpoint)
+
+    def save(self, val_acc=1e9):
         """
         Save current weights of the network and update state variables.
         Save optimizer and scheduler parameters, if defined.
         """
+        val_acc = float(val_acc)
         if val_acc < self.best_val_acc:
             self.best_val_acc = val_acc
-            self.best_epoch = self.current_epoch
+            self.best_epoch = int(self.current_epoch)
         # Checkpoint data
-        checkpoint_path = os.path.join(
-            self.saves_path, f'checkpoint-{self.current_epoch:04d}')
         state = {
             'epoch': self.current_epoch,
             'step' : self.current_step,
@@ -180,16 +196,15 @@ class AbstractModel:
             'best_epoch': self.best_epoch,
             'best_val_acc': self.best_val_acc,
             'state_dict': self.network.state_dict()}
-        torch.save(state, checkpoint_path)
+        torch.save(state, self.checkpoint_path(self.current_epoch))
         # Training checkpoint data
         if self.optimizer is None:
-            return
-        checkpoint_training_path = os.path.join(
-            self.saves_path, f'checkpoint_training-{self.current_epoch:04d}')
+            return self
         state_training = {'optimizer': self.optimizer.state_dict()}
         if self.scheduler is not None:
             state_training.update({'scheduler': self.scheduler.state_dict()})
-        torch.save(state_training, checkpoint_training_path)
+        torch.save(state_training, self.checkpoint_path(
+            self.current_epoch, training_checkpoint=True))
         return self
 
     def clean_saves(self):
@@ -205,20 +220,20 @@ class AbstractModel:
             if f_split[0] != 'checkpoint':
                 continue
             checkpoint = int(f_split[-1])
-            checkpoint_data = torch.load(os.path.join(
-                self.saves_path, f'checkpoint-{checkpoint:04d}'),
-                map_location=torch.device('cpu'))
-            checkpoint_val_acc.append((checkpoint, checkpoint_data['val_acc']))
+            checkpoint_data = torch.load(
+                self.checkpoint_path(checkpoint),
+                map_location=torch.device('cpu'), weights_only=True)
+            checkpoint_val_acc.append((checkpoint, (
+                    checkpoint_data['val_acc'], checkpoint_data['epoch'])))
         if len(checkpoint_val_acc) - 1 > self.maximum_saves:
             checkpoints = [i[0] for i in sorted(
-                checkpoint_val_acc[:-1], key=lambda val_acc: val_acc[1])]
+                checkpoint_val_acc[:-1], key=lambda x: x[1])]
             for checkpoint in checkpoints[self.maximum_saves:]:
-                checkpoint_path = os.path.join(
-                    self.saves_path, f'checkpoint-{checkpoint:04d}')
+                checkpoint_path = self.checkpoint_path(checkpoint)
                 if os.path.isfile(checkpoint_path):
                     os.remove(checkpoint_path)
-                checkpoint_training_path = os.path.join(
-                    self.saves_path, f'checkpoint_training-{checkpoint:04d}')
+                checkpoint_training_path = self.checkpoint_path(
+                    checkpoint, training_checkpoint=True)
                 if os.path.isfile(checkpoint_training_path):
                     os.remove(checkpoint_training_path)
         return self
@@ -233,7 +248,7 @@ class AbstractModel:
         """
         checkpoint_data = get_checkpoint_data(
             self.saves_path, checkpoint, training, self.current_epoch,
-            self.device)
+            self.device, self.checkpoint_n_digits)
         if checkpoint_data is None:
             return self
         self.current_epoch = checkpoint_data['epoch']
@@ -247,7 +262,7 @@ class AbstractModel:
                 self.saves_path, f'checkpoint_training-{checkpoint:04d}')
             checkpoint_training_data = torch.load(
                 os.path.join(self.saves_path, checkpoint_training_path),
-                map_location=self.device)
+                map_location=self.device, weights_only=True)
             self.optimizer.load_state_dict(
                 checkpoint_training_data['optimizer'])
         if training and self.scheduler is not None:
