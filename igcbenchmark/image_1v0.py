@@ -16,13 +16,8 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 N_IMAGES = 73000
 IMG_SIZE_PX = 425
 SRGB_TO_CIE1931_Y = (0.2126729, 0.7151522, 0.0721750)
-MATLAB_RGB2GRAY = (0.2989, 0.5870, 0.1140)  # nearly REC601 to CIE1931_Y
-NEUTRAL_GRAY_EV = (-2.51401829, -2.44076063, -2.31796921)  # for 50 Lab
-#                 (-2.30958135, -2.23629420, -2.11351562) for 127 sRGB
-IMGNET_MEAN = (0.485, 0.456, 0.406)
-IMGNET_STD = (0.229, 0.224, 0.225)
-COLOR_TYPES = ('none', 'lin_rgb', 'log2_rgb', 'imgnet')
-LUMINANCE_TYPES = ('lin_Y', 'log2_Y', 'nsd_lum')
+NEUTRAL_GRAY_LOG2_Y = -2.44076063  # neutral gray from Lab (50, 0, 0)
+LUMINANCE_TYPES = ('none', 'lin_Y', 'log2_Y')
 
 
 # Directory utils
@@ -49,7 +44,7 @@ def get_imgstat_dir(data_dir=DATA_DIR):
 # Color space utils
 
 
-def srgb_to_linear(img):
+def srgb_to_linear_rgb(img):
     mask = img <= 0.04045
     img[mask] /= 12.92
     mask = np.invert(mask)
@@ -59,26 +54,22 @@ def srgb_to_linear(img):
     return img
 
 
-def color_to_grayscale(img, coefs=SRGB_TO_CIE1931_Y, dtype=np.float32):
-    return np.sum(img * np.array(coefs, dtype=dtype)[None, None, :], axis=2)
+def linear_rgb_to_Y(img):  # pylint: disable=C0103
+    coefs = np.array(SRGB_TO_CIE1931_Y, dtype=np.float32)[None, None, :]
+    return np.sum(img * coefs, axis=2)
 
 
-def luminance_to_ev(img, min_luminance=1e-3):
-    return np.log2(np.clip(img, min_luminance, 1.0)) - NEUTRAL_GRAY_EV[1]
-
-
-def color_to_ev(img, min_luminance=1e-3):
-    return np.log2(np.clip(img, min_luminance, 1.0)) - NEUTRAL_GRAY_EV
+def Y_to_log2_Y(img, min_luminance=1e-3):  # pylint: disable=C0103
+    return np.log2(np.clip(img, min_luminance, 1.0)) - NEUTRAL_GRAY_LOG2_Y
 
 
 # Image Set
 
 
 class ImgSet:
-    def __init__(self, img_type='lin_rgb', img_size=None):
+    def __init__(self, img_type='log2_Y', img_size=None):
         # Attributes
-        assert img_type in (COLOR_TYPES + LUMINANCE_TYPES),\
-            'Unknown image type.'
+        assert img_type in LUMINANCE_TYPES, 'Unknown image type.'
         self.img_type = img_type
         self.img_size = img_size
         if self.img_size is None:
@@ -88,9 +79,7 @@ class ImgSet:
         self.paths = tuple(os.path.join(
             image_dir, f'nsd_{i:05d}.png') for i in range(N_IMAGES))
         self.paths = tuple(path for path in self.paths if os.path.isfile(path))
-        self.n, self.n_c = len(self.paths), 3
-        if self.img_type in LUMINANCE_TYPES:
-            self.n_c = 1
+        self.n, self.n_c = len(self.paths), 1
         # Standardization
         self.mean, self.std = None, None
         self.apply_standardization = False
@@ -127,9 +116,6 @@ class ImgSet:
             file_data = np.load(std_file_path)
             self.mean = file_data['mean']
             self.std = file_data['std']
-        elif self.img_type == 'imgnet':
-            self.mean = np.array(IMGNET_MEAN, dtype=np.float32)
-            self.std = np.array(IMGNET_STD, dtype=np.float32)
         else:
             print('No standardization values.')
         self.apply_standardization = True
@@ -193,16 +179,10 @@ class ImgSet:
             except OSError:
                 print(f'Failed loading : {path}')
         # Color transformations
-        if self.img_type in ('lin_rgb', 'log2_rgb'):
-            img = srgb_to_linear(img)
-            if self.img_type == 'log2_rgb':
-                img = color_to_ev(img)
-        elif self.img_type in ('lin_Y', 'log2_Y'):
-            img = color_to_grayscale(srgb_to_linear(img))
+        if self.img_type in ('lin_Y', 'log2_Y'):
+            img = linear_rgb_to_Y(srgb_to_linear_rgb(img))
             if self.img_type == 'log2_Y':
-                img = luminance_to_ev(img)
-        elif self.img_type == 'nsd_lum':
-            img = np.power(color_to_grayscale(img, MATLAB_RGB2GRAY), 2.0)
+                img = Y_to_log2_Y(img)
         # Reshape for augmentation
         if augment:
             img = np.reshape(
@@ -214,7 +194,7 @@ class ImgSet:
 
     @torch.no_grad()
     def torch(self, idx, rng=None):
-        augment = self.apply_standardization and (rng is not None)
+        augment = self.apply_augmentation and (rng is not None)
         # Get image
         x = torch.tensor(self.get_image(idx, augment), dtype=torch.float32)
         # Standardize
@@ -228,7 +208,7 @@ class ImgSet:
             aug_idx = aug_idx.expand(-1, -1, -1, self.n_c)
             x = torch.gather(x, dim=2, index=aug_idx).squeeze(dim=2)
         # Permute channels
-        if augment or self.img_type in COLOR_TYPES:
+        if augment or self.n_c > 1:
             x = x.permute(2, 0, 1)
         else:
             x = x.unsqueeze(dim=0)
