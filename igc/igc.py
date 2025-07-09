@@ -163,9 +163,9 @@ class IntegratedGradients(AbstractAttributionMethod):
     def _get_ig_post_size_from_dtld(self):
         x, _ = self.dataset[0]
         if self.multi_x:
-            x = tuple(x_i.unsqueeze(dim=0) for x_i in x)
+            x = tuple(x_i.unsqueeze(dim=0).to(self.device) for x_i in x)
         else:
-            x = (x.unsqueeze(dim=0),)
+            x = (x.unsqueeze(dim=0).to(self.device),)
         x_emb = self._emb(x)
         ig_ = tuple(x_emb_i.unsqueeze(dim=1).numpy() for x_emb_i in x_emb)
         x_ = tuple(x_i.numpy() for x_i in x)
