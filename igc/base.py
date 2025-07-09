@@ -696,9 +696,9 @@ class AbstractAttributionMethod:
     def _get_embedding_size_from_dtst(self):
         x, _ = self.dataset[0]
         if self.multi_x:
-            x = tuple(x_i.unsqueeze(dim=0) for x_i in x)
+            x = tuple(x_i.unsqueeze(dim=0).to(self.device) for x_i in x)
         else:
-            x = (x.unsqueeze(dim=0),)
+            x = (x.unsqueeze(dim=0).to(self.device),)
         x_emb = self._emb(x)
         if isinstance(x_emb, (tuple, list)):
             return tuple(x_emb_i.size()[1:] for x_emb_i in x_emb)
