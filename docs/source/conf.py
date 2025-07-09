@@ -42,6 +42,7 @@ exclude_patterns = []
 html_theme = "pydata_sphinx_theme"
 html_static_path = ["_static"]
 html_show_sourcelink = False
+html_favicon = "_static/plelievre_favicon.png"
 html_theme_options = {
     "icon_links": [
         {
