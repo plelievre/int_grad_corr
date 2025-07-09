@@ -167,8 +167,8 @@ class IntegratedGradients(AbstractAttributionMethod):
         else:
             x = (x.unsqueeze(dim=0).to(self.device),)
         x_emb = self._emb(x)
-        ig_ = tuple(x_emb_i.unsqueeze(dim=1).numpy() for x_emb_i in x_emb)
-        x_ = tuple(x_i.numpy() for x_i in x)
+        ig_ = tuple(x_emb_i.unsqueeze(dim=1).cpu().numpy() for x_emb_i in x_emb)
+        x_ = tuple(x_i.cpu().numpy() for x_i in x)
         ig_p = self._ig_post(ig_, x_)
         if isinstance(ig_p, (tuple, list)):
             return tuple(ig_p_i.shape[2:] for ig_p_i in ig_p)
