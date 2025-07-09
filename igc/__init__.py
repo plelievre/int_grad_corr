@@ -1,30 +1,45 @@
 """
-Integrated Gradient Correlation (IGC) utils implemented in PyTorch.
+Integrated Gradient Correlation (IGC) is a Python/PyTorch package that provides
+a unique dataset-wise attribution method.
 
-This module provides functions to compute:
-- Gradients
-- Integrated Gradients
-- Integrated Gradient Correlation
-- Integrated Gradient Auto-Correlation
-- IGC error
-- IGaC error
+It is designed to improve the interpretability of deep neural networks at a
+task-level, rather than an instance-level (as available attribution methods
+generally do). For more theoretical details, please refer to the original
+paper (http://arxiv.org/abs/2404.13910).
 
-A sub-module naive_2v0 provides (for demonstration purpose only):
-- IG mean and std
-- naive correlation
-- naive ttest
+This package primarily focuses on a class computing IGC attributions for PyTorch
+modules. Nonetheless, it also offers utilities to calculate simple gradients,
+Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
-A sub-module bsc_1v0 provides (for demonstration purpose only):
-- Baseline Shapley
-- Baseline Shapley Correlation
+Main Attribution Methods
+------------------------
 
-Versions:
-1v0: Functions can only study model inputs individually.
-2v0: Optimized computations. Functions accept embedded inputs.
-     Functions can study multiple model inputs simultaneously.
+- igc (igc.igc)
+    - Gradients
+    - Integrated Gradients
+    - Integrated Gradient Correlation
 
-Author: Pierre Lelievre
+Other attribution methods
+-------------------------
+
+- igc.igac
+    - Integrated Gradient Auto-Correlation
+
+- igc.naive
+    - IG mean and std
+    - naive correlation
+    - naive ttest
+
+- igc.bsc
+    - Baseline Shapley
+    - Baseline Shapley Correlation
+
+Utilities
+---------
+
+- igc.base
+    - AbstractAttributionMethod
+    - DataManager
 """
 
-from .igc_2v0 import (
-    grad, int_grad, int_grad_corr, igc_error, int_grad_auto_corr, igac_error)
+from .igc import Gradients, IntegratedGradients, IntGradCorr

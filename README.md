@@ -1,53 +1,66 @@
 # Integrated Gradient Correlation
-[arXiv](http://arxiv.org/abs/2404.13910) | [BibTeX](#bibtex)
 
-[**Integrated Gradient Correlation: a Dataset-wise Attribution Method**](http://arxiv.org/abs/2404.13910)<br/>
-[Pierre Lelièvre](https://plelievre.com)\*, Chien-Chung Chen\*<br>
-<sub><sup>\*Department of Psychology, National Taiwan University<sub><sup>
+Integrated Gradient Correlation (IGC) is a Python/PyTorch package that provides
+a unique dataset-wise attribution method.
 
-| ![IGC benchmark](assets/igc_benchmark.jpg) |
-|:--:|
-| *IGC attributions associated with the prediction of localized image statistics from natural images.* |
+It is designed to improve the interpretability of deep neural networks at a
+*task-level*, rather than an *instance-level* (as available attribution methods
+generally do). For more theoretical details, please refer to the original
+[paper](http://arxiv.org/abs/2404.13910).
 
-| ![IGC fMRI (luminance contrast)](assets/igc_fmri_contrast.jpg) |
-|:--:|
-| *IGC attributions associated with the prediction of image luminance contrast from fMRI data.* |
-
-## Requirements
-A suitable [conda](https://conda.io/) environment named **int_grad_corr** can
-be created and activated with:
-
-```
-conda env create -f environment.yml
-conda activate int_grad_corr
-```
-
-If you have a GPU supporting [CUDA](https://developer.nvidia.com/cuda-downloads),
-you can also use:
-
-```
-conda env create -f environment_gpu.yml
-conda activate int_grad_corr
-```
+This package primarily focuses on a class computing IGC attributions for PyTorch
+modules. Nonetheless, it also offers utilities to calculate simple gradients,
+Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
 ## Usage
-The paper demonstrates IGC on several real-life examples but we
-only provide a [Jupyter Notebook](igc_benchmark.ipynb) to reproduce the results
-found in the benchmark section. This models predict localized image statistics
-from the 73k natural images of the [NSD dataset](http://naturalscenesdataset.org)).
 
-However, the core python code computing IGC (located [here](igc/igc_2v0.py))
-can be easily employed with your own models and data.
+- [User Guide](https://github.com/plelievre/int_grad_corr.github.io)
 
-## BibTeX
+- [Examples](https://github.com/plelievre/int_grad_corr.github.io)
 
-```bibtex
-@misc{lelièvre2024igc,
-    title={Integrated Gradient Correlation: a Dataset-wise Attribution Method},
-    author={Pierre Lelièvre and Chien-Chung Chen},
-    year={2024},
-    eprint={2404.13910},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG}
-}
-```
+## API Reference
+
+- [API Reference](https://github.com/plelievre/int_grad_corr.github.io)
+
+## How to cite this work?
+
+- For general and theoretical aspects
+
+    **Integrated Gradient Correlation: a Dataset-wise Attribution Method** ([arXiv](http://arxiv.org/abs/2404.13910))\
+    [Pierre Lelièvre](https://plelievre.com), Chien-Chung Chen\
+    *Department of Psychology, National Taiwan University*
+
+    ```bibtex
+    @misc{lelièvre2024igc,
+        title={Integrated Gradient Correlation: a Dataset-wise Attribution Method},
+        author={Pierre Lelièvre and Chien-Chung Chen},
+        year={2024},
+        eprint={2404.13910},
+        archivePrefix={arXiv},
+        primaryClass={cs.LG}
+    }
+    ```
+
+- For the use of this package
+
+    **To be defined**\
+    [Pierre Lelièvre](https://plelievre.com)\
+    *Department of Psychology, National Taiwan University*
+
+    ```bibtex
+    @misc{lelièvre2025igc,
+        title={to be defined},
+        author={Pierre Lelièvre},
+        year={2025},
+    }
+    ```
+
+## Index
+
+- [Index](https://github.com/plelievre/int_grad_corr.github.io)
+
+## License
+
+The IGC library is freely available under the [MIT License](https://github.com/plelievre/int_grad_corr/blob/main/LICENSE).
+
+Copyright 2024 Pierre Lelièvre

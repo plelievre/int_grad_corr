@@ -4,6 +4,10 @@
 # Python
 *.pyc
 
+# Docs
+/docs/build/
+/docs/source/generated/
+
 # Data
 **/data/
 **/logs/
