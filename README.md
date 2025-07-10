@@ -14,13 +14,13 @@ Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
 ## Usage
 
-- [User Guide](https://github.com/plelievre/int_grad_corr.github.io)
+- [User Guide](https://plelievre.github.io/int_grad_corr/guide.html)
 
-- [Examples](https://github.com/plelievre/int_grad_corr.github.io)
+- [Examples](https://plelievre.github.io/int_grad_corr/examples.html)
 
 ## API Reference
 
-- [API Reference](https://github.com/plelievre/int_grad_corr.github.io)
+- [API Reference](https://plelievre.github.io/int_grad_corr/api.html)
 
 ## How to cite this work?
 
@@ -57,7 +57,7 @@ Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
 ## Index
 
-- [Index](https://github.com/plelievre/int_grad_corr.github.io)
+- [Index](https://plelievre.github.io/int_grad_corr/genindex.html)
 
 ## License
 
