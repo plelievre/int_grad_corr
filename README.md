@@ -22,46 +22,18 @@ Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
 - [API Reference](https://plelievre.github.io/int_grad_corr/api.html)
 
-## How to cite this work?
+## Citations
 
-- Original paper
-
-    [![DOI:10.48550/arXiv.2404.13910](http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg)](https://doi.org/10.48550/arXiv.2404.13910)
-
-    **Integrated Gradient Correlation: a Dataset-wise Attribution Method**\
+- **Integrated Gradient Correlation: a Dataset-wise Attribution Method**\
     [Pierre Lelièvre](https://plelievre.com), Chien-Chung Chen\
     *Department of Psychology, National Taiwan University*
 
-    ```bibtex
-    @misc{lelièvre2024igc,
-        title={Integrated Gradient Correlation: a Dataset-wise Attribution Method},
-        author={Pierre Lelièvre and Chien-Chung Chen},
-        year={2024},
-        eprint={2404.13910},
-        archivePrefix={arXiv},
-        primaryClass={cs.LG}
-    }
-    ```
+    [![DOI](http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg)](https://doi.org/10.48550/arXiv.2404.13910)
 
-- Package
 
-    [![DOI:10.48550/arXiv.2404.13910](http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg)](https://doi.org/10.48550/arXiv.2404.13910)
+- **Package** (latest version)
 
-    **To be defined**\
-    [Pierre Lelièvre](https://plelievre.com)\
-    *Department of Psychology, National Taiwan University*
-
-    ```bibtex
-    @misc{lelièvre2025igc,
-        title={to be defined},
-        author={Pierre Lelièvre},
-        year={2025},
-    }
-    ```
-
-## Index
-
-- [Index](https://plelievre.github.io/int_grad_corr/genindex.html)
+    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15852412.svg)](https://doi.org/10.5281/zenodo.15852412)
 
 ## License
 

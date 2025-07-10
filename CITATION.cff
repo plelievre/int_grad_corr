@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: Integrated Gradient Correlation
+authors:
+  - affiliation: National Taiwan University
+    family-names: "Lelièvre"
+    given-names: Pierre
+    orcid: https://orcid.org/0000-0002-2010-9105
+date-released: '2025-07-10'
+doi: 10.5281/zenodo.15852412
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.15852412
+type: software
+license:
+  - MIT
+abstract: <p>Integrated Gradient Correlation (IGC) is a Python/PyTorch package that
+  provides a unique dataset-wise attribution method.</p><p>It is designed to improve
+  the interpretability of deep neural networks at a <i>task-level</i>, rather than
+  an <i>instance-level</i> (as available attribution methods generally do). For more
+  theoretical details, please refer to the original paper.</p>
+keywords:
+  - computer science
+  - machine learning
+  - deep learning
+  - attribution method
+  - interpretability
+message: "If you use IGC in your research, please cite it using these metadata."
