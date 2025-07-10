@@ -1,0 +1,30 @@
+{
+    "creators": [
+        {
+            "name": "Lelièvre, Pierre",
+            "orcid": "0000-0002-2010-9105",
+            "affiliation": "National Taiwan University"
+        }
+    ],
+    "title": "Integrated Gradient Correlation",
+    "version": "1.0.0",
+    "access_right": "open",
+    "related_identifiers": [
+        {
+            "identifier": "https://doi.org/10.48550/arXiv.2404.13910",
+            "relation": "isSupplementTo",
+            "resource_type": "preprint"
+        }
+    ],
+    "keywords": [
+        "computer science",
+        "machine learning",
+        "deep learning",
+        "attribution method",
+        "interpretability"
+    ],
+    "license": "mit",
+    "upload_type": "software",
+    "language": "eng",
+    "description": "<p>Integrated Gradient Correlation (IGC) is a Python/PyTorch package that provides a unique dataset-wise attribution method.</p><p>It is designed to improve the interpretability of deep neural networks at a <i>task-level</i>, rather than an <i>instance-level</i> (as available attribution methods generally do). For more theoretical details, please refer to the original paper.</p>"
+}

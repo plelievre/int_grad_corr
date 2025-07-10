@@ -24,9 +24,11 @@ Integrated Gradients (IG), and some naive dataset-wise attribution methods.
 
 ## How to cite this work?
 
-- For general and theoretical aspects
+- Original paper
 
-    **Integrated Gradient Correlation: a Dataset-wise Attribution Method** ([arXiv](http://arxiv.org/abs/2404.13910))\
+    [![DOI:10.48550/arXiv.2404.13910](http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg)](https://doi.org/10.48550/arXiv.2404.13910)
+
+    **Integrated Gradient Correlation: a Dataset-wise Attribution Method**\
     [Pierre Lelièvre](https://plelievre.com), Chien-Chung Chen\
     *Department of Psychology, National Taiwan University*
 
@@ -41,7 +43,9 @@ Integrated Gradients (IG), and some naive dataset-wise attribution methods.
     }
     ```
 
-- For the use of this package
+- Package
+
+    [![DOI:10.48550/arXiv.2404.13910](http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg)](https://doi.org/10.48550/arXiv.2404.13910)
 
     **To be defined**\
     [Pierre Lelièvre](https://plelievre.com)\
