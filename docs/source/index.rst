@@ -36,7 +36,10 @@ API Reference
 How to cite this work?
 ----------------------
 
-- For general and theoretical aspects
+- Original paper
+
+   .. image:: http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg
+      :target: https://doi.org/10.48550/arXiv.2404.13910
 
    | **Integrated Gradient Correlation: a Dataset-wise Attribution Method** (`arXiv <http://arxiv.org/abs/2404.13910>`_)
    | `Pierre Lelièvre <https://plelievre.com>`_, Chien-Chung Chen
@@ -53,7 +56,10 @@ How to cite this work?
          primaryClass={cs.LG}
       }
 
-- For the use of this package
+- Package
+
+   .. image:: http://img.shields.io/badge/DOI-10.48550/arXiv.2404.13910-B31B1B.svg
+      :target: https://doi.org/10.48550/arXiv.2404.13910
 
    | **To be defined**
    | `Pierre Lelièvre <https://plelievre.com>`_
