@@ -13,7 +13,7 @@
         {
             "identifier": "https://doi.org/10.48550/arXiv.2404.13910",
             "relation": "isSupplementTo",
-            "resource_type": "preprint"
+            "resource_type": "publication-preprint"
         }
     ],
     "keywords": [
