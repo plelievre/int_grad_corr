@@ -4,25 +4,24 @@ Examples
 Environment Installation
 ------------------------
 
-- Create and activate a `conda`_ environment named `int_grad_corr``
+- Create and activate a virtual environment
 
 .. code-block:: console
 
-   conda env create -f examples/environment.yml
-   conda activate int_grad_corr
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r examples/requirements.txt
 
 - | If you have a GPU supporting `CUDA`_, you can also use the file named
-  | `environment_gpu.yml`.
+  | `requirements_gpu.txt`.
 
-- Install the IGC package with `pip`_
+- Install the IGC package
 
 .. code-block:: console
 
    pip install .
 
-.. _conda: https://www.anaconda.com/docs/getting-started/miniconda/main
 .. _CUDA: https://developer.nvidia.com/cuda-downloads
-.. _pip: https://pip.pypa.io
 
 IGC Benchmark
 -------------
