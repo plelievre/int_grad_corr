@@ -1,4 +1,4 @@
-torch==2.2
+torch==2.2.*
 torchvision
 tensorboard
 numpy<2
