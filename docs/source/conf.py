@@ -27,7 +27,7 @@ extensions = [
     "sphinxcontrib.bibtex",
 ]
 
-autoclass_content = "both"
+autoclass_content = "class"
 
 napoleon_custom_sections = ["Attributes", "Methods"]
 

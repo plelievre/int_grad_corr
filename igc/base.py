@@ -33,13 +33,44 @@ class _SeedGenerator:
 
 class DataManager:
     """
-    Help to setup the different dataloaders iterating over :obj:`x`, :obj:`x_0`,
-    or :obj:`y_idx`.
+    Help to setup the different dataloaders iterating over inputs :obj:`x`,
+    *true* outputs :obj:`y`, baselines :obj:`x_0`, and output component indices
+    :obj:`y_idx`.
 
     Parameters
     ----------
     attr : AbstractAttributionMethod
+        Attribution method.
     y_required : bool
+        Define if *true* outputs :obj:`y` are required by :attr:`x_dtld`.
+
+    Attributes
+    ----------
+    n_x : int
+        Number of :obj:`x` samples.
+    x_bsz : int
+        Batch size of :attr:`x_dtld`.
+    x_nb : int
+        Number of batches of :attr:`x_dtld`.
+    x_dtld : torch.utils.data.DataLoader
+        Dataloader iterating over inputs :obj:`x` (and *true* outputs :obj:`y`
+        if :obj:`y_required`).
+    n_x_0 : int
+        Number of :obj:`x_0` baselines.
+    x_0_bsz : int
+        Batch size of :attr:`x_0_dtld`.
+    x_0_nb : int
+        Number of batches of :attr:`x_0_dtld`.
+    x_0_dtld : torch.utils.data.DataLoader
+        Dataloader iterating over baselines :obj:`x_0`.
+    n_y_idx : int
+        Number of :obj:`y_idx` component indices.
+    y_idx_bsz : int
+        Batch size of :attr:`y_idx_dtld`.
+    y_idx_nb : int
+        Number of batches of :attr:`y_idx_dtld`.
+    y_idx_dtld : torch.utils.data.DataLoader
+        Dataloader iterating over output component indices :obj:`y_idx`.
     """
 
     def __init__(self, attr, y_required=True):
@@ -390,22 +421,39 @@ class DataManager:
 
     def add_data(self, x, x_0, y_idx, n_steps, batch_size, x_seed, x_0_seed):
         """
-        Setup a data manager iterating over :obj:`x`, :obj:`x_0`, and
-        :obj:`y_idx`.
+        Setup a data manager iterating over inputs :obj:`x`, baselines
+        :obj:`x_0`, and output component indices :obj:`y_idx`.
 
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         x_0 : None | int | float | ArrayLike | tuple(ArrayLike)
+            - None : Zero baseline :obj:`x_0`.
+            - int : Number of :obj:`x_0` baselines sampled from the dataset.
+            - float : Constant baseline :obj:`x_0`.
+            - ArrayLike | tuple(ArrayLike) : Set :obj:`x_0` baselines used by :attr:`x_0_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         n_steps : int
+            Number of steps of the Riemann approximation of supporting
+            Integrated Gradients (IG) (see
+            :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
+            Seed associated with :attr:`x_0_dtld`.
 
         Returns
         -------
-        int | ArrayLike
+        torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
         x = self._check_x(x)
@@ -419,18 +467,28 @@ class DataManager:
 
     def add_data_iter_x_y_idx(self, x, y_idx, batch_size, x_seed):
         """
-        Setup a data manager iterating over :obj:`x` and :obj:`y_idx`.
+        Setup a data manager iterating over inputs :obj:`x` and output component
+        indices :obj:`y_idx`.
 
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
 
         Returns
         -------
-        int | ArrayLike
+        torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
         x = self._check_x(x)
@@ -442,18 +500,25 @@ class DataManager:
 
     def add_data_iter_x(self, x, y_idx, batch_size, x_seed):
         """
-        Setup a data manager iterating over :obj:`x`.
+        Setup a data manager iterating over inputs :obj:`x`.
 
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         y_idx : None | int | ArrayLike
+            Selected output component indices. If :obj:`None`, :obj:`y_idx` is
+            resolved to all output component indices.
         batch_size : int
+            Set :attr:`x_bsz`.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
 
         Returns
         -------
-        int | ArrayLike
+        torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
         x = self._check_x(x)
@@ -465,18 +530,27 @@ class DataManager:
     def add_data_naive(self, x, y_idx, batch_size, x_seed):
         """
         Setup a data manager dedicated to naive attribution methods (
-        :class:`NaiveCorrelation` and :class:`NaiveTTest`).
+        :class:`igc.naive.NaiveCorrelation` and :class:`igc.naive.NaiveTTest`).
 
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
 
         Returns
         -------
-        int | ArrayLike
+        torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
         x = self._check_x(x)
@@ -491,22 +565,37 @@ class DataManager:
     ):
         """
         Setup a data manager dedicated to Baseline Shapley and Baseline Shapley
-        Correlation attribution methods (:class:`BaselineShapley` and
-        :class:`BslShapCorr`).
+        Correlation attribution methods (:class:`igc.bsc.BaselineShapley` and
+        :class:`igc.bsc.BslShapCorr`).
 
         Parameters
         ----------
-        x : None | int | ArrayLike | tuple(ArrayLike)
-        x_0 : None | int | float | ArrayLike | tuple(ArrayLike)
+        x : None | int | ArrayLike
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike : Set new :obj:`x` used by :attr:`x_dtld`.
+        x_0 : None | int | float | ArrayLike
+            - None : Zero baseline :obj:`x_0`.
+            - int : Number of :obj:`x_0` baselines sampled from the dataset.
+            - float : Constant baseline :obj:`x_0`.
+            - ArrayLike : Set :obj:`x_0` baselines used by :attr:`x_0_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         n_iter : int
+            Number of iterations, i.e. the number of random sequences of input
+            component indices enabled one after the other.
         x_0_batch_size : int
+            Set :attr:`x_0_bsz`.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
+            Seed associated with :attr:`x_0_dtld`.
 
         Returns
         -------
-        int | ArrayLike
+        torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
         x = self._check_x(x)
@@ -540,7 +629,7 @@ class AbstractAttributionMethod:
         for more information. In addition, inputs must be organized in a
         specific manner, see warning below.
     dtld_kwargs : dict
-        Additional keyword arguments to the dataloader
+        Additional keyword arguments to the dataloaders
         (:obj:`torch.utils.data.DataLoader`) constructed around the
         :attr:`dataset`, except: :obj:`dataset`, :obj:`batch_size`,
         :obj:`shuffle`, :obj:`sampler`, :obj:`batch_sampler`, and
@@ -717,8 +806,12 @@ class AbstractAttributionMethod:
         """
         Add an embedding method to preprocess categorical inputs.
 
+        .. note::
+            Adding an embedding method modifies the output shapes of
+            attributions associated with categorical inputs.
+
         .. warning::
-            This effect of this method must not excluded from the forward method
+            The effect of this method must not excluded from the forward method
             defined by :attr:`forward_method_name` at initialization.
 
         Parameters

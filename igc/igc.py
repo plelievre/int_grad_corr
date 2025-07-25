@@ -19,6 +19,42 @@ from .base import AbstractAttributionMethod, DataManager
 class Gradients(AbstractAttributionMethod):
     """
     Gradients.
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        PyTorch module defining the model under scrutiny.
+    dataset : torch.utils.data.Dataset
+        PyTorch dataset providing inputs/outputs for any given index. See
+        `PyTorch documentation <https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.Dataset>`_
+        for more information. In addition, inputs must be organized in a
+        specific manner, see warning below.
+    dtld_kwargs : dict
+        Additional keyword arguments to the dataloaders
+        (:obj:`torch.utils.data.DataLoader`) constructed around the
+        :attr:`dataset`, except: :obj:`dataset`, :obj:`batch_size`,
+        :obj:`shuffle`, :obj:`sampler`, :obj:`batch_sampler`, and
+        :obj:`generator`.
+    forward_method_name : str
+        Name of the forward method of the :attr:`module`. If :const:`None`,
+        the default :obj:`forward` is used.
+    forward_method_kwargs : dict
+        Additional keyword arguments to the forward method of the
+        :attr:`module`.
+    dtype : torch.dtype
+        Default data type of all intermediary tensors. It also defines the numpy
+        data type of the attribution results.
+    dtype_cat : torch.dtype
+        Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. warning::
+        When computing attributions on models using multiple inputs, e.g., x_1,
+        x_2, and x_cat, with x_cat a categorical input, the dataset must return
+        all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
+        categorical inputs must be placed at the end of the tuple.
     """
 
     def compute(  # pylint: disable=W0221
@@ -30,13 +66,26 @@ class Gradients(AbstractAttributionMethod):
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
 
         Returns
         -------
-        tuple(ArrayLike)
+        tuple
+            - ArrayLike | tuple(ArrayLike) : sampled inputs
+            - ArrayLike : corresponding *true* outputs
+            - ArrayLike : model predictions
+            - ArrayLike | tuple(ArrayLike) : gradients of shape (:attr:`n_x`, :attr:`n_y_idx`, * unbatched :obj:`x` shape)
         """
         # Set module to eval mode
         self.module.eval()
@@ -118,6 +167,42 @@ class IntegratedGradients(AbstractAttributionMethod):
 
     See the original paper :cite:`SundararajanAxiomaticAttributionDeep2017` for
     more information.
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        PyTorch module defining the model under scrutiny.
+    dataset : torch.utils.data.Dataset
+        PyTorch dataset providing inputs/outputs for any given index. See
+        `PyTorch documentation <https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.Dataset>`_
+        for more information. In addition, inputs must be organized in a
+        specific manner, see warning below.
+    dtld_kwargs : dict
+        Additional keyword arguments to the dataloaders
+        (:obj:`torch.utils.data.DataLoader`) constructed around the
+        :attr:`dataset`, except: :obj:`dataset`, :obj:`batch_size`,
+        :obj:`shuffle`, :obj:`sampler`, :obj:`batch_sampler`, and
+        :obj:`generator`.
+    forward_method_name : str
+        Name of the forward method of the :attr:`module`. If :const:`None`,
+        the default :obj:`forward` is used.
+    forward_method_kwargs : dict
+        Additional keyword arguments to the forward method of the
+        :attr:`module`.
+    dtype : torch.dtype
+        Default data type of all intermediary tensors. It also defines the numpy
+        data type of the attribution results.
+    dtype_cat : torch.dtype
+        Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. warning::
+        When computing attributions on models using multiple inputs, e.g., x_1,
+        x_2, and x_cat, with x_cat a categorical input, the dataset must return
+        all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
+        categorical inputs must be placed at the end of the tuple.
     """
 
     def __init__(
@@ -177,6 +262,10 @@ class IntegratedGradients(AbstractAttributionMethod):
     def add_ig_post_function(self, ig_post_func, ig_post_func_kwargs=None):
         """
         Add a function to postprocess individual IG attributions.
+
+        .. note::
+            Adding a function to postprocess individual IG modifies
+            the output shapes of computed attributions.
 
         .. warning::
             The IG postprocessing function must have the following signature:
@@ -334,17 +423,44 @@ class IntegratedGradients(AbstractAttributionMethod):
         Parameters
         ----------
         x : None | int | ArrayLike | tuple(ArrayLike)
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
+            - ArrayLike | tuple(ArrayLike) : Set new :obj:`x` used by :attr:`x_dtld`.
         x_0 : None | int | float | ArrayLike | tuple(ArrayLike)
+            - None : Zero baseline :obj:`x_0`.
+            - int : Number of :obj:`x_0` baselines sampled from the dataset.
+            - float : Constant baseline :obj:`x_0`.
+            - ArrayLike | tuple(ArrayLike) : Set :obj:`x_0` baselines used by :attr:`x_0_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         n_steps : int
+            Number of steps of the Riemann approximation of supporting
+            Integrated Gradients (IG) (see
+            :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
+            Seed associated with :attr:`x_0_dtld`.
         check_error : bool
+            If :obj:`True`, the mean absolute error of IG approximations is
+            reported. For each input, baseline, and output component, the
+            *completeness* property of IG states that the sum of input component
+            attributions must be equal to the difference between the model
+            predictions associated with the input and baseline under scrutiny.
 
         Returns
         -------
-        tuple(ArrayLike)
+        tuple
+            - ArrayLike | tuple(ArrayLike) : sampled inputs
+            - ArrayLike : corresponding *true* outputs
+            - ArrayLike : model predictions of sampled inputs
+            - ArrayLike : model predictions of baselines
+            - ArrayLike | tuple(ArrayLike) : IG attributions of shape (:attr:`n_x`, :attr:`n_y_idx`, * unbatched :obj:`x` shape).
         """
         # Set module to eval mode
         self.module.eval()
@@ -436,6 +552,42 @@ class IntGradCorr(IntegratedGradients):
 
     See the original paper :cite:`LelievreIntegratedGradientCorrelation2024` for
     more information.
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        PyTorch module defining the model under scrutiny.
+    dataset : torch.utils.data.Dataset
+        PyTorch dataset providing inputs/outputs for any given index. See
+        `PyTorch documentation <https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.Dataset>`_
+        for more information. In addition, inputs must be organized in a
+        specific manner, see warning below.
+    dtld_kwargs : dict
+        Additional keyword arguments to the dataloaders
+        (:obj:`torch.utils.data.DataLoader`) constructed around the
+        :attr:`dataset`, except: :obj:`dataset`, :obj:`batch_size`,
+        :obj:`shuffle`, :obj:`sampler`, :obj:`batch_sampler`, and
+        :obj:`generator`.
+    forward_method_name : str
+        Name of the forward method of the :attr:`module`. If :const:`None`,
+        the default :obj:`forward` is used.
+    forward_method_kwargs : dict
+        Additional keyword arguments to the forward method of the
+        :attr:`module`.
+    dtype : torch.dtype
+        Default data type of all intermediary tensors. It also defines the numpy
+        data type of the attribution results.
+    dtype_cat : torch.dtype
+        Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. warning::
+        When computing attributions on models using multiple inputs, e.g., x_1,
+        x_2, and x_cat, with x_cat a categorical input, the dataset must return
+        all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
+        categorical inputs must be placed at the end of the tuple.
     """
 
     def compute(  # pylint: disable=W0221,W0237
@@ -455,17 +607,43 @@ class IntGradCorr(IntegratedGradients):
         Parameters
         ----------
         x_0 : None | int | float | ArrayLike | tuple(ArrayLike)
+            - None : Zero baseline :obj:`x_0`.
+            - int : Number of :obj:`x_0` baselines sampled from the dataset.
+            - float : Constant baseline :obj:`x_0`.
+            - ArrayLike | tuple(ArrayLike) : Set :obj:`x_0` baselines used by :attr:`x_0_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         n_steps : int
+            Number of steps of the Riemann approximation of supporting
+            Integrated Gradients (IG) (see
+            :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
+            Seed associated with :attr:`x_0_dtld`.
         n_x : None | int
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
         check_error : bool
+            If :obj:`True`, the mean absolute error of IG and IGC approximations
+            is reported. For each input, baseline, and output component, the
+            *Completeness* property of IG states that the sum of input component
+            attributions must be equal to the difference between the model
+            predictions associated with the input and baseline under scrutiny.
+            For each output component, the *completeness* property of IGC states
+            that the sum of input component attributions must be equal to the
+            correlation between model predictions and *true* outputs.
 
         Returns
         -------
         ArrayLike | tuple(ArrayLike)
+            IGC attributions of shape (:attr:`n_y_idx`, * unbatched :obj:`x`
+            shape)
         """
         # Set module to eval mode
         self.module.eval()
@@ -591,14 +769,26 @@ class IntGradCorr(IntegratedGradients):
         Parameters
         ----------
         igc : ArrayLike | tuple(ArrayLike)
+            IGC attributions of shape (:attr:`n_y_idx`, * unbatched :obj:`x`
+            shape)
         y_idx : None | int | ArrayLike
+            Selected output component indices. If :obj:`None`, :obj:`y_idx` is
+            resolved to all output component indices.
         batch_size : int
+            Set :attr:`x_bsz`.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         n_x : None | int
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
 
         Returns
         -------
         ArrayLike
+            Per output component mean absolute error of IGC approximations.
+            For each output component, the *completeness* property of IGC states
+            that the sum of input component attributions must be equal to the
+            correlation between model predictions and *true* outputs.
         """
         # Set module to eval mode
         self.module.eval()

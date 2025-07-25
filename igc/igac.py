@@ -23,6 +23,42 @@ class IntGradAutoCorr(IntegratedGradients):
 
     See the original paper :cite:`LelievreIntegratedGradientCorrelation2024` for
     more information.
+
+    Parameters
+    ----------
+    module : torch.nn.Module
+        PyTorch module defining the model under scrutiny.
+    dataset : torch.utils.data.Dataset
+        PyTorch dataset providing inputs/outputs for any given index. See
+        `PyTorch documentation <https://docs.pytorch.org/docs/stable/data.html#torch.utils.data.Dataset>`_
+        for more information. In addition, inputs must be organized in a
+        specific manner, see warning below.
+    dtld_kwargs : dict
+        Additional keyword arguments to the dataloaders
+        (:obj:`torch.utils.data.DataLoader`) constructed around the
+        :attr:`dataset`, except: :obj:`dataset`, :obj:`batch_size`,
+        :obj:`shuffle`, :obj:`sampler`, :obj:`batch_sampler`, and
+        :obj:`generator`.
+    forward_method_name : str
+        Name of the forward method of the :attr:`module`. If :const:`None`,
+        the default :obj:`forward` is used.
+    forward_method_kwargs : dict
+        Additional keyword arguments to the forward method of the
+        :attr:`module`.
+    dtype : torch.dtype
+        Default data type of all intermediary tensors. It also defines the numpy
+        data type of the attribution results.
+    dtype_cat : torch.dtype
+        Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. warning::
+        When computing attributions on models using multiple inputs, e.g., x_1,
+        x_2, and x_cat, with x_cat a categorical input, the dataset must return
+        all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
+        categorical inputs must be placed at the end of the tuple.
     """
 
     def compute(  # pylint: disable=W0221,W0237
@@ -42,17 +78,43 @@ class IntGradAutoCorr(IntegratedGradients):
         Parameters
         ----------
         x_0 : None | int | float | ArrayLike | tuple(ArrayLike)
+            - None : Zero baseline :obj:`x_0`.
+            - int : Number of :obj:`x_0` baselines sampled from the dataset.
+            - float : Constant baseline :obj:`x_0`.
+            - ArrayLike | tuple(ArrayLike) : Set :obj:`x_0` baselines used by :attr:`x_0_dtld`.
         y_idx : None | int | ArrayLike
+            - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
+            - int : Select a specific output component index :obj:`y_idx`.
+            - ArrayLike : Select multiple output component indices :obj:`y_idx`.
         n_steps : int
+            Number of steps of the Riemann approximation of supporting
+            Integrated Gradients (IG) (see
+            :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
         batch_size : int | tuple(int)
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
+            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
+            Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
+            Seed associated with :attr:`x_0_dtld`.
         n_x : None | int
+            - None : :attr:`x_dtld` iterates over the whole dataset.
+            - int : Number of :obj:`x` inputs sampled from the dataset.
         check_error : bool
+            If :obj:`True`, the mean absolute error of IG and IGaC
+            approximations is reported. For each input, baseline, and output
+            component, the *Completeness* property of IG states that the sum of
+            input component attributions must be equal to the difference between
+            the model predictions associated with the input and baseline under
+            scrutiny. For each output component, the *completeness* property of
+            IGaC states that the sum of input component attributions must be
+            equal to 1.
 
         Returns
         -------
         ArrayLike | tuple(ArrayLike)
+            IGaC attributions of shape (:attr:`n_y_idx`, * unbatched :obj:`x`
+            shape)
         """
         # Set module to eval mode
         self.module.eval()
@@ -166,10 +228,15 @@ class IntGradAutoCorr(IntegratedGradients):
         Parameters
         ----------
         igac : ArrayLike | tuple(ArrayLike)
-
+            IGaC attributions of shape (:attr:`n_y_idx`, * unbatched :obj:`x`
+            shape)
         Returns
         -------
         ArrayLike
+            Per output component mean absolute error of IGaC approximations.
+            For each output component, the *completeness* property of IGaC
+            states that the sum of input component attributions must be equal
+            to 1.
         """
         # Multi x
         if not isinstance(igac, tuple):
