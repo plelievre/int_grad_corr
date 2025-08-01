@@ -42,7 +42,7 @@ section of the original IGC `paper`_.
 .. image:: _static/igc_simulation.jpeg
 
 .. _paper: http://arxiv.org/abs/2404.13910
-.. _notebook: https://github.com/plelievre/int_grad_corr/blob/main/examples/igc_simulation.ipynb
+.. _notebook: https://github.com/plelievre/int_grad_corr/blob/main/examples/igc_benchmark.ipynb
 
 Representation of Image Statistics in the Brain
 -----------------------------------------------
