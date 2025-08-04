@@ -350,9 +350,6 @@ class DataManager:
             self.x_0_seed_rng = _SeedGenerator(x_0_seed)
             return self
         # Predefined baselines
-        #   Multi x
-        if not self.attr.multi_x:
-            x_0 = (x_0,)
         #   Repeat along batch dimension
         x_0 = tuple(x_0_i.repeat_interleave(self.x_bsz, dim=0) for x_0_i in x_0)
         #   Build x_0_dtld
