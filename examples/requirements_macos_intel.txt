@@ -1,9 +1,0 @@
-torch==2.2.*
-torchvision
-tensorboard
-numpy<2
-scipy
-scikit-learn
-matplotlib
-jupyter
-tqdm
