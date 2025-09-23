@@ -42,7 +42,7 @@ class Gradients(AbstractAttributionMethod):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -93,7 +93,9 @@ class Gradients(AbstractAttributionMethod):
         dtmg = DataManager(self, y_required=False)
         y_idx = dtmg.add_data_iter_x_y_idx(x, y_idx, batch_size, x_seed)
         # Prepare outputs
-        x_np = self._prepare_output((dtmg.n_x,), self.x_size)
+        x_np = self._prepare_output(
+            (dtmg.n_x,), self.x_size, dtmg.get_x_dtype(numpy=True)
+        )
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         grad = self._prepare_output(
@@ -190,7 +192,7 @@ class IntegratedGradients(AbstractAttributionMethod):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -477,7 +479,9 @@ class IntegratedGradients(AbstractAttributionMethod):
             for sz_i in self.embedding_size
         )
         # Prepare outputs
-        x_np = self._prepare_output((dtmg.n_x,), self.x_size)
+        x_np = self._prepare_output(
+            (dtmg.n_x,), self.x_size, dtmg.get_x_dtype(numpy=True)
+        )
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_0 = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
@@ -575,7 +579,7 @@ class IntGradCorr(IntegratedGradients):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
