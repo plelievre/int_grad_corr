@@ -52,7 +52,7 @@ class BaselineShapley(AbstractAttributionMethod):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -293,7 +293,7 @@ class BslShapCorr(BaselineShapley):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
