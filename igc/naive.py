@@ -50,7 +50,7 @@ class IntGradMeanStd(IntegratedGradients):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -150,12 +150,12 @@ class IntGradMeanStd(IntegratedGradients):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
+            # Record original x
+            x_i_np = (x_i_j.cpu().numpy() for x_i_j in x_i)
             # Prepare x
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
-                # Record original x
-                x_i_ori = x_i
                 # Embed discrete inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
@@ -173,7 +173,7 @@ class IntGradMeanStd(IntegratedGradients):
             # Compute integrated gradients
             y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps, w)
             # Apply IG post-function
-            ig_i = self._ig_post(ig_i, x_i_ori)
+            ig_i = self._ig_post(ig_i, x_i_np)
             # Update IG mean and std
             for j, ig_i_j in enumerate(ig_i):
                 ig_i_j_delta = ig_i_j - ig_mean[j]
@@ -234,7 +234,7 @@ class NaiveCorrelation(AbstractAttributionMethod):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -407,7 +407,7 @@ class NaiveTTest(AbstractAttributionMethod):
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
