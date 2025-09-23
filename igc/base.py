@@ -91,14 +91,33 @@ class DataManager:
         self.x_0_nb = 1
         self.x_0_dtld = None
         self.x_0_seed_rng = None
-        # Init x_0 attributes
+        # Init y_idx attributes
         self.y_idx_checked = False
         self.n_y_idx = 1
         self.y_idx_bsz = 1
         self.y_idx_nb = 1
         self.y_idx_dtld = None
 
-    def _get_x_dtype(self):
+    def get_x_dtype(self, numpy=False):
+        """
+        Return the PyTorch data types of all inputs :obj:`x`.
+
+        Parameters
+        ----------
+        numpy : bool
+            If `True`, it returns NumPy data types instead.
+
+        Returns
+        -------
+        tuple(dtype)
+            Data types of all inputs :obj:`x`.
+        """
+        if numpy:
+            x_dtype = (self.attr.dtype_np,) * (
+                len(self.attr.x_size) - self.attr.embedding_n_cat
+            )
+            x_dtype += (self.attr.dtype_cat_np,) * self.attr.embedding_n_cat
+            return x_dtype
         x_dtype = (self.attr.dtype,) * (
             len(self.attr.x_size) - self.attr.embedding_n_cat
         )
@@ -131,7 +150,7 @@ class DataManager:
             # Make x a tensor on the device
             x = tuple(
                 torch.as_tensor(x_i, dtype=x_dtype_i, device=self.attr.device)
-                for x_i, x_dtype_i in zip(x, self._get_x_dtype())
+                for x_i, x_dtype_i in zip(x, self.get_x_dtype())
             )
             # Expand batch dimension if necessary
             x = tuple(
@@ -176,7 +195,7 @@ class DataManager:
                 torch.full(
                     (1,) + sz_i, x_0, dtype=dt_i, device=self.attr.device
                 )
-                for sz_i, dt_i in zip(self.attr.x_size, self._get_x_dtype())
+                for sz_i, dt_i in zip(self.attr.x_size, self.get_x_dtype())
             )
         # Predefined baselines
         else:
@@ -186,7 +205,7 @@ class DataManager:
             # Make x a tensor on the device
             x_0 = tuple(
                 torch.as_tensor(x_0_i, dtype=x_dtype_i, device=self.attr.device)
-                for x_0_i, x_dtype_i in zip(x_0, self._get_x_dtype())
+                for x_0_i, x_dtype_i in zip(x_0, self.get_x_dtype())
             )
             # Expand batch dimension if necessary
             x_0 = tuple(
@@ -638,7 +657,7 @@ class AbstractAttributionMethod:
         Additional keyword arguments to the forward method of the
         :attr:`module`.
     dtype : torch.dtype
-        Default data type of all intermediary tensors. It also defines the numpy
+        Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
@@ -668,8 +687,8 @@ class AbstractAttributionMethod:
         self.dtld_kwargs = self._check_kwargs(dtld_kwargs)
         self.forward_func = self._check_forward_func(forward_method_name)
         self.forward_func_kwargs = self._check_kwargs(forward_method_kwargs)
-        self.dtype, self.dtype_cat, self.dtype_np = self._check_dtype(
-            dtype, dtype_cat
+        self.dtype, self.dtype_cat, self.dtype_np, self.dtype_cat_np = (
+            self._check_dtype(dtype, dtype_cat)
         )
         self.x_size, self.y_size, self.multi_x = self._get_x_y_sizes()
         # Init embedding parameters
@@ -709,14 +728,17 @@ class AbstractAttributionMethod:
         return getattr(self.module, forward_func_name)
 
     def _check_dtype(self, dtype, dtype_cat):
-        # Check default dtype, and dtype_cat for categorical inputs
+        # Check default dtype and dtype_cat for categorical inputs
         assert dtype in (torch.float16, torch.float32, torch.float64)
         assert dtype_cat in (torch.int16, torch.int32, torch.int64)
-        # Define dtype for numpy arrays
+        # Define dtype and dtype_cat for NumPy arrays
         dtype_np = np.float64
         if dtype is not torch.float64:
             dtype_np = np.float32
-        return dtype, dtype_cat, dtype_np
+        dtype_cat_np = np.int64
+        if dtype_cat is not torch.int64:
+            dtype_cat_np = np.int32
+        return dtype, dtype_cat, dtype_np, dtype_cat_np
 
     def _check_x_size(self, x_size):
         if isinstance(x_size, int):
@@ -838,10 +860,12 @@ class AbstractAttributionMethod:
         self.embedding_size = self._check_x_size(embedding_size)
         return self
 
-    def _prepare_output(self, size_prefix, size):
+    def _prepare_output(self, size_prefix, size, dtype=None):
+        if dtype is None:
+            dtype = (self.dtype_np,) * len(size)
         return tuple(
-            np.zeros(size_prefix + size_i, dtype=self.dtype_np)
-            for size_i in size
+            np.zeros(size_prefix + size_i, dtype=dtype_i)
+            for size_i, dtype_i in zip(size, dtype)
         )
 
     @torch.no_grad()
