@@ -63,6 +63,14 @@ class DataManager:
         Number of batches of :attr:`x_0_dtld`.
     x_0_dtld : torch.utils.data.DataLoader
         Dataloader iterating over baselines :obj:`x_0`.
+    n_z_idx : int
+        Number of :obj:`z_idx` component indices.
+    z_idx_bsz : int
+        Batch size of :attr:`z_idx_dtld`.
+    z_idx_nb : int
+        Number of batches of :attr:`z_idx_dtld`.
+    z_idx_dtld : torch.utils.data.DataLoader
+        Dataloader iterating over hidden layer component indices :obj:`z_idx`.
     n_y_idx : int
         Number of :obj:`y_idx` component indices.
     y_idx_bsz : int
@@ -91,6 +99,11 @@ class DataManager:
         self.x_0_nb = 1
         self.x_0_dtld = None
         self.x_0_seed_rng = None
+        # Init z_idx attributes
+        self.n_z_idx = self.attr.z_size
+        self.z_idx_bsz = 1
+        self.z_idx_nb = 1
+        self.z_idx_dtld = None
         # Init y_idx attributes
         self.y_idx_checked = False
         self.n_y_idx = 1
@@ -259,7 +272,15 @@ class DataManager:
 
     def _check_batchsizes(self, batch_size, use_x_0=True, use_y_idx=True):
         # Init batch sizes
-        if isinstance(batch_size, tuple) and use_x_0 and use_y_idx:
+        if (
+            isinstance(batch_size, tuple)
+            and use_x_0
+            and use_y_idx
+            and self.attr.use_z
+        ):
+            self.x_bsz, self.x_0_bsz, self.z_idx_bsz = batch_size
+            batch_size = None
+        elif isinstance(batch_size, tuple) and use_x_0 and use_y_idx:
             self.x_bsz, self.x_0_bsz, self.y_idx_bsz = batch_size
             batch_size = None
         elif isinstance(batch_size, tuple) and use_y_idx:
@@ -273,14 +294,26 @@ class DataManager:
                 self.x_bsz = 1
             if use_x_0 and (self.x_0_bsz is None):
                 self.x_0_bsz = self.n_x_0
-            if use_y_idx and (self.y_idx_bsz is None):
-                self.y_idx_bsz = self.n_y_idx
-            batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
+            if self.attr.use_z:
+                if self.z_idx_bsz is None:
+                    self.z_idx_bsz = self.n_z_idx
+                batch_size = self.x_bsz * self.x_0_bsz * self.z_idx_bsz
+            else:
+                if use_y_idx and (self.y_idx_bsz is None):
+                    self.y_idx_bsz = self.n_y_idx
+                batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
         batch_size = max(1, batch_size)
-        # Compute y_idx_bsz and y_idx_nb
-        self.y_idx_bsz = min(self.n_y_idx, batch_size)
-        self.y_idx_nb = int(np.ceil(self.n_y_idx / self.y_idx_bsz))
-        batch_size = max(1, batch_size // self.y_idx_bsz)
+        if self.attr.use_z:
+            self.y_idx_bsz = self.n_y_idx
+            # Compute z_bsz and z_nb
+            self.z_idx_bsz = min(self.n_z_idx, batch_size)
+            self.z_idx_nb = int(np.ceil(self.n_z_idx / self.z_idx_bsz))
+            batch_size = max(1, batch_size // self.z_idx_bsz)
+        else:
+            # Compute y_idx_bsz and y_idx_nb
+            self.y_idx_bsz = min(self.n_y_idx, batch_size)
+            self.y_idx_nb = int(np.ceil(self.n_y_idx / self.y_idx_bsz))
+            batch_size = max(1, batch_size // self.y_idx_bsz)
         # Compute x_0_bsz and x_0_nb
         self.x_0_bsz = _greatest_divisor(self.n_x_0, batch_size)
         self.x_0_nb = self.n_x_0 // self.x_0_bsz
@@ -297,13 +330,20 @@ class DataManager:
             self.x_bsz = _greatest_divisor(self.n_x, batch_size)
             self.x_nb = self.n_x // self.x_bsz
         # Print actual batchsizes
-        batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
-        if use_x_0 and use_y_idx:
+        if use_x_0 and use_y_idx and self.attr.use_z:
+            batch_size = self.x_bsz * self.x_0_bsz * self.z_idx_bsz
+            print(
+                f"batch size: {batch_size} ({self.x_bsz}, {self.x_0_bsz}, "
+                f"{self.z_idx_bsz})"
+            )
+        elif use_x_0 and use_y_idx:
+            batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
             print(
                 f"batch size: {batch_size} ({self.x_bsz}, {self.x_0_bsz}, "
                 f"{self.y_idx_bsz})"
             )
         elif use_y_idx:
+            batch_size = self.x_bsz * self.y_idx_bsz
             print(f"batch size: {batch_size} ({self.x_bsz}, {self.y_idx_bsz})")
         else:
             print(f"batch size: {self.x_bsz}")
@@ -370,7 +410,12 @@ class DataManager:
             return self
         # Predefined baselines
         #   Repeat along batch dimension
-        x_0 = tuple(x_0_i.repeat_interleave(self.x_bsz, dim=0) for x_0_i in x_0)
+        if self.attr.multi_x:
+            x_0 = tuple(
+                x_0_i.repeat_interleave(self.x_bsz, dim=0) for x_0_i in x_0
+            )
+        else:
+            x_0 = x_0.repeat_interleave(self.x_bsz, dim=0)
         #   Build x_0_dtld
         bsz = self.x_bsz * self.x_0_bsz
         if self.attr.multi_x:
@@ -380,9 +425,35 @@ class DataManager:
             )
         else:
             self.x_0_dtld = tuple(
-                (x_0[0][i * bsz : (i + 1) * bsz], None)
-                for i in range(self.x_0_nb)
+                (x_0[i * bsz : (i + 1) * bsz], None) for i in range(self.x_0_nb)
             )
+        return self
+
+    @torch.no_grad()
+    def _init_z_idx_dtld(self, n_steps=1, repeat=True):
+        x_x_0_bsz = 1
+        if repeat is True:
+            x_x_0_bsz = self.x_bsz * self.x_0_bsz
+        elif repeat == "bsc":
+            x_x_0_bsz = self.x_bsz
+        # Fill z_idx with zeros to ensure even batchsizes
+        n_fill = self.z_idx_nb * self.z_idx_bsz - self.n_z_idx
+        z_idx = torch.concat(
+            (
+                torch.arange(
+                    self.n_z_idx, dtype=torch.int64, device=self.attr.device
+                ),
+                torch.zeros(n_fill, dtype=torch.int64, device=self.attr.device),
+            )
+        )
+        # Repeat along batch dimension
+        z_idx = z_idx.repeat_interleave(x_x_0_bsz)
+        # Build z_idx_dtld
+        bsz = x_x_0_bsz * self.z_idx_bsz
+        self.z_idx_dtld = tuple(
+            z_idx[i * bsz : (i + 1) * bsz].repeat(n_steps)
+            for i in range(self.z_idx_nb)
+        )
         return self
 
     @torch.no_grad()
@@ -390,6 +461,13 @@ class DataManager:
         assert n_steps > 0, "The number of steps must be positive."
         assert self.y_idx_checked, "Check 'y_idx' first."
         assert self.bsz_checked, "Check batch sizes first."
+        if self.attr.use_z:
+            self._init_z_idx_dtld(n_steps, repeat)
+            y_idx_ = y_idx.cpu().numpy()
+            self.attr.final_lin_weight = self.attr.final_lin_weight[y_idx_]
+            if self.attr.final_lin_bias is not None:
+                self.attr.final_lin_bias = self.attr.final_lin_bias[y_idx_]
+            return self
         x_x_0_bsz = 1
         if repeat is True:
             x_x_0_bsz = self.x_bsz * self.x_0_bsz
@@ -722,10 +800,10 @@ class AbstractAttributionMethod:
         ), "Dataset must be inherited from torch.utils.data.Dataset."
         return dataset
 
-    def _check_forward_func(self, forward_func_name):
-        if forward_func_name is None:
-            forward_func_name = "forward"
-        return getattr(self.module, forward_func_name)
+    def _check_forward_func(self, forward_method_name):
+        if forward_method_name is None:
+            forward_method_name = "forward"
+        return getattr(self.module, forward_method_name)
 
     def _check_dtype(self, dtype, dtype_cat):
         # Check default dtype and dtype_cat for categorical inputs
@@ -830,7 +908,7 @@ class AbstractAttributionMethod:
             attributions associated with categorical inputs.
 
         .. warning::
-            The effect of this method must not excluded from the forward method
+            The effect of this method must be excluded from the forward method
             defined by :attr:`forward_method_name` at initialization.
 
         Parameters

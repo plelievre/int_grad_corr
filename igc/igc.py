@@ -11,6 +11,7 @@ Integrated Gradient Correlation (IGC) utilities.
 
 import numpy as np
 import torch
+from torch import nn
 from tqdm import tqdm
 
 from .base import AbstractAttributionMethod, DataManager
@@ -227,6 +228,10 @@ class IntegratedGradients(AbstractAttributionMethod):
             dtype_cat,
         )
         # Init other parameters
+        self.use_z = False
+        self.z_size = None
+        self.final_lin_weight = None
+        self.final_lin_bias = None
         self.ig_post_func = None
         self.ig_post_func_kwargs = {}
         self.ig_post_size = self.embedding_size
@@ -245,6 +250,63 @@ class IntegratedGradients(AbstractAttributionMethod):
         if self.ig_post_func is None:
             self.ig_post_size = self.embedding_size
         return self
+
+    @torch.no_grad()
+    def _get_z_size_from_dtld(self):
+        x, _ = self.dataset[0]
+        if self.multi_x:
+            x = tuple(x_i.unsqueeze(dim=0).to(self.device) for x_i in x)
+        else:
+            x = (x.unsqueeze(dim=0).to(self.device),)
+        return self._fwd(self._emb(x)).size(1)
+
+    def add_final_linear_layer(self, final_linear_layer):
+        """
+        Add a final linear layer, separated from the forward method.
+
+        It accelerates the computation of Integrated Gradients (IG) when the
+        output dimensionality of :obj:`y` is large compared to size of the
+        latent variable :obj:`z` employed before this final linear layer.
+
+        .. warning::
+            The effect of this layer must be excluded from the forward method
+            defined by :attr:`forward_method_name` at initialization.
+
+        Parameters
+        ----------
+        final_linear_layer : torch.nn.Linear | str
+            Final linear layer of the :attr:`module`. It can also be defined by
+            its name.
+
+        Returns
+        -------
+        self
+        """
+        self.use_z = True
+        # Find and check the final linear layer
+        if isinstance(final_linear_layer, str):
+            for name, layer in self.module.named_modules():
+                if name == final_linear_layer:
+                    final_linear_layer = layer
+                    break
+        assert isinstance(
+            final_linear_layer, nn.Linear
+        ), "Final linear layer must be inherited from torch.nn.Linear."
+        # Extract weight and bias parameters
+        self.final_lin_weight = final_linear_layer.weight.detach().cpu().numpy()
+        if final_linear_layer.bias is not None:
+            self.final_lin_bias = final_linear_layer.bias.detach().cpu().numpy()
+            self.final_lin_bias = self.final_lin_bias[:, None, None]
+        # Check z_size
+        z_size = self._get_z_size_from_dtld()
+        self.z_size = self._check_y_size(z_size)
+        return self
+
+    def _apply_final_lin(self, z, use_bias=True):
+        y = np.einsum("ji,i...->j...", self.final_lin_weight, z)
+        if use_bias and self.final_lin_bias is not None:
+            y += self.final_lin_bias
+        return y
 
     @torch.no_grad()
     def _get_ig_post_size_from_dtld(self):
@@ -363,6 +425,74 @@ class IntegratedGradients(AbstractAttributionMethod):
                 int_grad[j][y_slc] += int_grad_i_j
         return y_0, y_r, int_grad
 
+    def _int_grad_per_x_per_x_0_optim(self, dtmg, x, x_0, n_steps, w):
+        # Prepare outputs
+        z_0 = np.zeros(
+            (dtmg.n_z_idx, dtmg.x_0_bsz, dtmg.x_bsz),
+            dtype=self.dtype_np,
+        )
+        z_r = np.zeros(
+            (dtmg.n_z_idx, dtmg.x_0_bsz, dtmg.x_bsz),
+            dtype=self.dtype_np,
+        )
+        int_grad = self._prepare_output(
+            (dtmg.n_z_idx, dtmg.x_0_bsz, dtmg.x_bsz),
+            self.embedding_size,
+        )
+        # Generate inputs along a linear path between x_0 and x
+        with torch.no_grad():
+            x_s = tuple()
+            for x_0_i, x_i, w_i in zip(x_0, x, w):
+                x_s_i = (1.0 - w_i) * x_0_i.unsqueeze(
+                    dim=0
+                ) + w_i * x_i.unsqueeze(dim=0)
+                x_s += (x_s_i.flatten(0, 1),)
+        # Compute input/baseline differences
+        x_diff = tuple(
+            (x_i - x_0_i)
+            .cpu()
+            .numpy()
+            .reshape((dtmg.z_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_i)
+            for x_i, x_0_i, sz_i in zip(x, x_0, self.embedding_size)
+        )
+        # Forward pass
+        z_f = self._fwd(x_s)
+        # Iterate over output features y_idx
+        for i, z_idx_i in enumerate(dtmg.z_idx_dtld):
+            # Current slice and batchsize
+            z_slc = slice(
+                i * dtmg.z_idx_bsz, min(dtmg.n_z_idx, (i + 1) * dtmg.z_idx_bsz)
+            )
+            batch_size = z_slc.stop - z_slc.start
+            # Compute predictions and gradients
+            z_r_i, grad_i = self._bwd(x_s, z_f, z_idx_i)
+            z_r_i = z_r_i.reshape(
+                (n_steps, dtmg.z_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz)
+            )[:, :batch_size]
+            grad_i = tuple(
+                grad_i_j.reshape(
+                    (n_steps, dtmg.z_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_j
+                )[:, :batch_size]
+                for grad_i_j, sz_j in zip(grad_i, self.embedding_size)
+            )
+            # Record z_0 and z_r
+            z_0[z_slc] += z_r_i[0]
+            z_r[z_slc] += z_r_i[-1]
+            # Compute integrated gradients (Riemann sums, trapezoidal rule)
+            for j, (grad_i_j, x_diff_j) in enumerate(zip(grad_i, x_diff)):
+                int_grad_i_j = grad_i_j[:-1] + grad_i_j[1:]
+                int_grad_i_j = 0.5 * np.mean(int_grad_i_j, axis=0)
+                int_grad_i_j *= x_diff_j[:batch_size]
+                int_grad[j][z_slc] += int_grad_i_j
+        # Apply final linear layer
+        y_0 = self._apply_final_lin(z_0)
+        y_r = self._apply_final_lin(z_r)
+        int_grad = tuple(
+            self._apply_final_lin(int_grad_i, use_bias=False)
+            for int_grad_i in int_grad
+        )
+        return y_0, y_r, int_grad
+
     def _int_grad_per_x(self, dtmg, x, n_steps, w):
         # Prepare outputs
         y_0 = np.zeros((dtmg.x_bsz, dtmg.n_y_idx), dtype=self.dtype_np)
@@ -385,16 +515,23 @@ class IntegratedGradients(AbstractAttributionMethod):
                 # Embed discrete inputs
                 x_0_i = self._emb(x_0_i)
                 # Repeat x_0 along batch dimension
+                if self.use_z:
+                    bsz = dtmg.z_idx_bsz
+                else:
+                    bsz = dtmg.y_idx_bsz
                 x_0_i = tuple(
-                    x_0_i_j.repeat(
-                        *((dtmg.y_idx_bsz,) + (1,) * (x_0_i_j.dim() - 1))
-                    )
+                    x_0_i_j.repeat(*((bsz,) + (1,) * (x_0_i_j.dim() - 1)))
                     for x_0_i_j in x_0_i
                 )
             # Compute integrated gradients
-            y_0_i, y_r_i, int_grad_i = self._int_grad_per_x_per_x_0(
-                dtmg, x, x_0_i, n_steps, w
-            )
+            if self.use_z:
+                y_0_i, y_r_i, int_grad_i = self._int_grad_per_x_per_x_0_optim(
+                    dtmg, x, x_0_i, n_steps, w
+                )
+            else:
+                y_0_i, y_r_i, int_grad_i = self._int_grad_per_x_per_x_0(
+                    dtmg, x, x_0_i, n_steps, w
+                )
             # Record y_0 and y_r
             y_0 += np.sum(y_0_i, axis=1).T
             y_r += np.sum(y_r_i, axis=1).T
@@ -513,13 +650,12 @@ class IntegratedGradients(AbstractAttributionMethod):
                 # Embed discrete inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
+                if self.use_z:
+                    bsz = dtmg.x_0_bsz * dtmg.z_idx_bsz
+                else:
+                    bsz = dtmg.x_0_bsz * dtmg.y_idx_bsz
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((bsz,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
@@ -702,13 +838,12 @@ class IntGradCorr(IntegratedGradients):
                 # Embed discrete inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
+                if self.use_z:
+                    bsz = dtmg.x_0_bsz * dtmg.z_idx_bsz
+                else:
+                    bsz = dtmg.x_0_bsz * dtmg.y_idx_bsz
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((bsz,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
@@ -829,6 +964,8 @@ class IntGradCorr(IntegratedGradients):
             x_i = self._emb(x_i)
             # Compute predictions
             y_r_i = self._fwd_no_grad(x_i)
+            if self.use_z:
+                y_r_i = self._apply_final_lin(y_r_i)
             # Update y_r_mean and y_r_std
             y_r_i_np = self._record_y(y_r_i, y_idx, dtmg.x_bsz)
             y_r_delta = y_r_i_np - y_r_mean

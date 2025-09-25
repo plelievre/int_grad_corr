@@ -159,13 +159,12 @@ class IntGradMeanStd(IntegratedGradients):
                 # Embed discrete inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
+                if self.use_z:
+                    bsz = dtmg.x_0_bsz * dtmg.z_idx_bsz
+                else:
+                    bsz = dtmg.x_0_bsz * dtmg.y_idx_bsz
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((bsz,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
