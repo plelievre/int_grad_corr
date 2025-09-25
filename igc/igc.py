@@ -308,6 +308,12 @@ class IntegratedGradients(AbstractAttributionMethod):
             y += self.final_lin_bias
         return y
 
+    def _apply_final_lin_error(self, z):
+        y = np.dot(z.cpu().numpy(), self.final_lin_weight.T)
+        if self.final_lin_bias is not None:
+            y += self.final_lin_bias[:, 0, 0]
+        return torch.as_tensor(y)
+
     @torch.no_grad()
     def _get_ig_post_size_from_dtld(self):
         x, _ = self.dataset[0]
@@ -965,7 +971,7 @@ class IntGradCorr(IntegratedGradients):
             # Compute predictions
             y_r_i = self._fwd_no_grad(x_i)
             if self.use_z:
-                y_r_i = self._apply_final_lin(y_r_i)
+                y_r_i = self._apply_final_lin_error(y_r_i)
             # Update y_r_mean and y_r_std
             y_r_i_np = self._record_y(y_r_i, y_idx, dtmg.x_bsz)
             y_r_delta = y_r_i_np - y_r_mean
