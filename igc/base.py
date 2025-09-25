@@ -370,7 +370,12 @@ class DataManager:
             return self
         # Predefined baselines
         #   Repeat along batch dimension
-        x_0 = tuple(x_0_i.repeat_interleave(self.x_bsz, dim=0) for x_0_i in x_0)
+        if self.attr.multi_x:
+            x_0 = tuple(
+                x_0_i.repeat_interleave(self.x_bsz, dim=0) for x_0_i in x_0
+            )
+        else:
+            x_0 = x_0.repeat_interleave(self.x_bsz, dim=0)
         #   Build x_0_dtld
         bsz = self.x_bsz * self.x_0_bsz
         if self.attr.multi_x:
@@ -722,10 +727,10 @@ class AbstractAttributionMethod:
         ), "Dataset must be inherited from torch.utils.data.Dataset."
         return dataset
 
-    def _check_forward_func(self, forward_func_name):
-        if forward_func_name is None:
-            forward_func_name = "forward"
-        return getattr(self.module, forward_func_name)
+    def _check_forward_func(self, forward_method_name):
+        if forward_method_name is None:
+            forward_method_name = "forward"
+        return getattr(self.module, forward_method_name)
 
     def _check_dtype(self, dtype, dtype_cat):
         # Check default dtype and dtype_cat for categorical inputs
@@ -830,7 +835,7 @@ class AbstractAttributionMethod:
             attributions associated with categorical inputs.
 
         .. warning::
-            The effect of this method must not excluded from the forward method
+            The effect of this method must be excluded from the forward method
             defined by :attr:`forward_method_name` at initialization.
 
         Parameters
