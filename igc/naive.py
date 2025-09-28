@@ -131,6 +131,11 @@ class IntGradMeanStd(IntegratedGradients):
         ig_error = 0.0
         ig_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
         ig_std = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        # Define x repeat size
+        if self.use_z:
+            x_rep = dtmg.x_0_bsz * dtmg.z_idx_bsz
+        else:
+            x_rep = dtmg.x_0_bsz * dtmg.y_idx_bsz
         # Iterate over x
         postfix = None
         if check_error:
@@ -155,12 +160,8 @@ class IntGradMeanStd(IntegratedGradients):
                 # Embed discrete inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
-                if self.use_z:
-                    bsz = dtmg.x_0_bsz * dtmg.z_idx_bsz
-                else:
-                    bsz = dtmg.x_0_bsz * dtmg.y_idx_bsz
                 x_i = tuple(
-                    x_i_j.repeat(*((bsz,) + (1,) * (x_i_j.dim() - 1)))
+                    x_i_j.repeat(*((x_rep,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
