@@ -275,7 +275,7 @@ class IntegratedGradients(AbstractAttributionMethod):
         Add a final linear layer, separated from the forward method.
 
         It accelerates the computation of Integrated Gradients (IG) when the
-        output dimensionality of :obj:`y` is large compared to size of the
+        output dimensionality of :obj:`y` is large compared to the size of the
         latent variable :obj:`z` employed before this final linear layer.
 
         .. warning::
