@@ -90,9 +90,10 @@ class IntGradAutoCorr(IntegratedGradients):
             Number of steps of the Riemann approximation of supporting
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
-        batch_size : int | tuple(int)
-            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
-            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz`=1, :attr:`x_0_bsz`=:attr:`n_x_0`, and :attr:`y_idx_bsz`=:attr:`n_y_idx` (or :attr:`z_idx_bsz`=:attr:`n_z_idx`).
+            - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` (or :attr:`z_idx_bsz`).
+            - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` (or :attr:`z_idx_bsz`) individually.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
@@ -123,19 +124,14 @@ class IntGradAutoCorr(IntegratedGradients):
         y_idx = dtmg.add_data(
             n_x, x_0, y_idx, n_steps, batch_size, x_seed, x_0_seed
         )
-        # Prepare interpolation coefficients w
-        w = tuple(
-            torch.linspace(
-                0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
-            )[(...,) + (None,) * (1 + len(sz_i))]
-            for sz_i in self.embedding_size
-        )
-        # Prepare outputs
+        # Init interpolation coefficients w
+        self._init_interpolation_coefficients(n_steps)
+        # Init outputs
         ig_error = 0.0
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        igac = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
-        igac_mean = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
+        igac = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        igac_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
         # Iterate over x
         postfix = None
         if check_error:
@@ -171,7 +167,7 @@ class IntGradAutoCorr(IntegratedGradients):
             # Update x_0_dtld seed
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
-            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps, w)
+            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
             # Update y_r_mean and y_r_std
             y_r_delta = y_r_i - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count

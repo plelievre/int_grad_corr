@@ -123,7 +123,7 @@ class BaselineShapley(AbstractAttributionMethod):
 
     @torch.no_grad()
     def _bsl_shap_per_x(self, dtmg, x, n_iter, x_0_seed):
-        # Prepare outputs
+        # Init outputs
         y_0 = np.zeros((dtmg.n_y_idx,), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_y_idx,), dtype=self.dtype_np)
         bsl_shap = np.zeros(
@@ -178,8 +178,9 @@ class BaselineShapley(AbstractAttributionMethod):
         n_iter : int
             Number of iterations, i.e. the number of random sequences of input
             component indices enabled one after the other.
-        x_0_batch_size : int
-            Set :attr:`x_0_bsz`.
+        x_0_batch_size : None | int
+            - None : Set :attr:`x_0_bsz`=:attr:`n_x_0`.
+            - int : Set :attr:`x_0_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
@@ -203,7 +204,7 @@ class BaselineShapley(AbstractAttributionMethod):
         # Check for multi_x
         assert (
             not self.multi_x
-        ), "Baseline Shapley does not support multiple inputs."
+        ), "Baseline Shapley (BS) does not support multiple inputs."
         # Set module to eval mode
         self.module.eval()
         # Init data manager
@@ -211,7 +212,7 @@ class BaselineShapley(AbstractAttributionMethod):
         y_idx = dtmg.add_data_bsc(
             x, x_0, y_idx, n_iter, x_0_batch_size, x_seed, x_0_seed
         )
-        # Prepare outputs
+        # Init outputs
         x_np = np.zeros((dtmg.n_x,) + self.x_size[0], dtype=self.dtype_np)
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_0 = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
@@ -332,8 +333,9 @@ class BslShapCorr(BaselineShapley):
         n_iter : int
             Number of iterations, i.e. the number of random sequences of input
             component indices enabled one after the other.
-        x_0_batch_size : int
-            Set :attr:`x_0_bsz`.
+        x_0_batch_size : None | int
+            - None : Set :attr:`x_0_bsz`=:attr:`n_x_0`.
+            - int : Set :attr:`x_0_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
@@ -358,9 +360,10 @@ class BslShapCorr(BaselineShapley):
             shape)
         """
         # Check for multi_x
-        assert (
-            not self.multi_x
-        ), "Baseline Shapley does not support multiple inputs."
+        assert not self.multi_x, (
+            "Baseline Shapley Correlation (BSC) does not support multiple "
+            "inputs."
+        )
         # Set module to eval mode
         self.module.eval()
         # Init data manager
@@ -368,7 +371,7 @@ class BslShapCorr(BaselineShapley):
         y_idx = dtmg.add_data_bsc(
             n_x, x_0, y_idx, n_iter, x_0_batch_size, x_seed, x_0_seed
         )
-        # Prepare outputs
+        # Init outputs
         bs_error = 0.0
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
@@ -490,7 +493,7 @@ class BslShapCorr(BaselineShapley):
         # Init data manager
         dtmg = DataManager(self)
         y_idx = dtmg.add_data_iter_x(n_x, y_idx, batch_size, x_seed)
-        # Prepare outputs
+        # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
