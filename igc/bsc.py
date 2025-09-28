@@ -179,7 +179,7 @@ class BaselineShapley(AbstractAttributionMethod):
             Number of iterations, i.e. the number of random sequences of input
             component indices enabled one after the other.
         x_0_batch_size : None | int
-            - None : Set :attr:`x_0_bsz`=:attr:`n_x_0`.
+            - None : Set :attr:`x_0_bsz` = :attr:`n_x_0`.
             - int : Set :attr:`x_0_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
@@ -334,7 +334,7 @@ class BslShapCorr(BaselineShapley):
             Number of iterations, i.e. the number of random sequences of input
             component indices enabled one after the other.
         x_0_batch_size : None | int
-            - None : Set :attr:`x_0_bsz`=:attr:`n_x_0`.
+            - None : Set :attr:`x_0_bsz` = :attr:`n_x_0`.
             - int : Set :attr:`x_0_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.

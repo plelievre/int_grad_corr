@@ -91,7 +91,7 @@ class IntGradAutoCorr(IntegratedGradients):
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
         batch_size : None | int | tuple(int)
-            - None : Set :attr:`x_bsz`=1, :attr:`x_0_bsz`=:attr:`n_x_0`, and :attr:`y_idx_bsz`=:attr:`n_y_idx` (or :attr:`z_idx_bsz`=:attr:`n_z_idx`).
+            - None : Set :attr:`x_bsz` = 1, :attr:`x_0_bsz` = :attr:`n_x_0`, and :attr:`y_idx_bsz` = :attr:`n_y_idx` (or :attr:`z_idx_bsz` = :attr:`n_z_idx`).
             - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` (or :attr:`z_idx_bsz`).
             - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` (or :attr:`z_idx_bsz`) individually.
         x_seed : None | int
