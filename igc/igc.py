@@ -73,7 +73,8 @@ class Gradients(AbstractAttributionMethod):
             - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
             - int : Select a specific output component index :obj:`y_idx`.
             - ArrayLike : Select multiple output component indices :obj:`y_idx`.
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1 and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -92,15 +93,13 @@ class Gradients(AbstractAttributionMethod):
         # Init data manager
         dtmg = DataManager(self, y_required=False)
         y_idx = dtmg.add_data_iter_x_y_idx(x, y_idx, batch_size, x_seed)
-        # Prepare outputs
-        x_np = self._prepare_output(
+        # Init outputs
+        x_np = self._init_output(
             (dtmg.n_x,), self.x_size, dtmg.get_x_dtype(numpy=True)
         )
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
-        grad = self._prepare_output(
-            (dtmg.n_x, dtmg.n_y_idx), self.embedding_size
-        )
+        grad = self._init_output((dtmg.n_x, dtmg.n_y_idx), self.embedding_size)
         # Iterate over x #######################################################
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="grad")
@@ -227,6 +226,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             dtype_cat,
         )
         # Init other parameters
+        self.w = None
         self.ig_post_func = None
         self.ig_post_func_kwargs = {}
         self.ig_post_size = self.embedding_size
@@ -244,6 +244,16 @@ class IntegratedGradients(AbstractAttributionMethod):
         )
         if self.ig_post_func is None:
             self.ig_post_size = self.embedding_size
+        return self
+
+    def _init_interpolation_coefficients(self, n_steps):
+        assert n_steps > 0, "The number of steps must be positive."
+        self.w = tuple(
+            torch.linspace(
+                0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
+            )[(...,) + (None,) * (1 + len(sz_i))]
+            for sz_i in self.embedding_size
+        )
         return self
 
     @torch.no_grad()
@@ -302,24 +312,17 @@ class IntegratedGradients(AbstractAttributionMethod):
         # pylint: disable=E1102
         return self.ig_post_func(*ig_x, *x, **self.ig_post_func_kwargs)
 
-    def _int_grad_per_x_per_x_0(self, dtmg, x, x_0, n_steps, w):
-        # Prepare outputs
-        y_0 = np.zeros(
-            (dtmg.n_y_idx, dtmg.x_0_bsz, dtmg.x_bsz),
-            dtype=self.dtype_np,
-        )
-        y_r = np.zeros(
-            (dtmg.n_y_idx, dtmg.x_0_bsz, dtmg.x_bsz),
-            dtype=self.dtype_np,
-        )
-        int_grad = self._prepare_output(
-            (dtmg.n_y_idx, dtmg.x_0_bsz, dtmg.x_bsz),
-            self.embedding_size,
+    def _int_grad_per_x_per_x_0(self, dtmg, x, x_0, n_steps):
+        # Init outputs
+        y_0 = np.zeros((dtmg.n_y_idx, dtmg.x_bsz), dtype=self.dtype_np)
+        y_r = np.zeros((dtmg.n_y_idx, dtmg.x_bsz), dtype=self.dtype_np)
+        int_grad = self._init_output(
+            (dtmg.n_y_idx, dtmg.x_bsz), self.embedding_size
         )
         # Generate inputs along a linear path between x_0 and x
         with torch.no_grad():
             x_s = tuple()
-            for x_0_i, x_i, w_i in zip(x_0, x, w):
+            for x_0_i, x_i, w_i in zip(x_0, x, self.w):
                 x_s_i = (1.0 - w_i) * x_0_i.unsqueeze(
                     dim=0
                 ) + w_i * x_i.unsqueeze(dim=0)
@@ -352,24 +355,26 @@ class IntegratedGradients(AbstractAttributionMethod):
                 )[:, :batch_size]
                 for grad_i_j, sz_j in zip(grad_i, self.embedding_size)
             )
-            # Record y_0 and y_r
-            y_0[y_slc] += y_r_i[0]
-            y_r[y_slc] += y_r_i[-1]
+            # Record y_0 and y_r, and sum over baselines
+            y_0[y_slc] += y_r_i[0].sum(axis=1)
+            y_r[y_slc] += y_r_i[-1].sum(axis=1)
             # Compute integrated gradients (Riemann sums, trapezoidal rule)
             for j, (grad_i_j, x_diff_j) in enumerate(zip(grad_i, x_diff)):
                 int_grad_i_j = grad_i_j[:-1] + grad_i_j[1:]
                 int_grad_i_j = 0.5 * np.mean(int_grad_i_j, axis=0)
                 int_grad_i_j *= x_diff_j[:batch_size]
-                int_grad[j][y_slc] += int_grad_i_j
+                int_grad[j][y_slc] += int_grad_i_j.sum(axis=1)
         return y_0, y_r, int_grad
 
-    def _int_grad_per_x(self, dtmg, x, n_steps, w):
-        # Prepare outputs
+    def _int_grad_per_x(self, dtmg, x, n_steps):
+        # Init outputs
         y_0 = np.zeros((dtmg.x_bsz, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.x_bsz, dtmg.n_y_idx), dtype=self.dtype_np)
-        int_grad = self._prepare_output(
+        int_grad = self._init_output(
             (dtmg.x_bsz, dtmg.n_y_idx), self.embedding_size
         )
+        # Define x_0 repeat size
+        x_0_rep = dtmg.y_idx_bsz
         # Iterate over baselines
         for i, (x_0_i, _) in enumerate(dtmg.x_0_dtld):
             # Break when x_0_nb is reached
@@ -386,21 +391,19 @@ class IntegratedGradients(AbstractAttributionMethod):
                 x_0_i = self._emb(x_0_i)
                 # Repeat x_0 along batch dimension
                 x_0_i = tuple(
-                    x_0_i_j.repeat(
-                        *((dtmg.y_idx_bsz,) + (1,) * (x_0_i_j.dim() - 1))
-                    )
+                    x_0_i_j.repeat(*((x_0_rep,) + (1,) * (x_0_i_j.dim() - 1)))
                     for x_0_i_j in x_0_i
                 )
-            # Compute integrated gradients
+            # Compute integrated gradients (summed over baselines)
             y_0_i, y_r_i, int_grad_i = self._int_grad_per_x_per_x_0(
-                dtmg, x, x_0_i, n_steps, w
+                dtmg, x, x_0_i, n_steps
             )
             # Record y_0 and y_r
-            y_0 += np.sum(y_0_i, axis=1).T
-            y_r += np.sum(y_r_i, axis=1).T
+            y_0 += y_0_i.T
+            y_r += y_r_i.T
             # Record integrated gradients
             for j, int_grad_i_j in enumerate(int_grad_i):
-                int_grad[j][...] += np.sum(int_grad_i_j, axis=1).swapaxes(0, 1)
+                int_grad[j][...] += int_grad_i_j.swapaxes(0, 1)
         # Average across baselines
         y_0 /= dtmg.n_x_0
         y_r /= dtmg.n_x_0
@@ -441,7 +444,8 @@ class IntegratedGradients(AbstractAttributionMethod):
             Number of steps of the Riemann approximation of supporting
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1, :attr:`x_0_bsz` = :attr:`n_x_0`, and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -471,23 +475,20 @@ class IntegratedGradients(AbstractAttributionMethod):
         y_idx = dtmg.add_data(
             x, x_0, y_idx, n_steps, batch_size, x_seed, x_0_seed
         )
-        # Prepare interpolation coefficients w
-        w = tuple(
-            torch.linspace(
-                0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
-            )[(...,) + (None,) * (1 + len(sz_i))]
-            for sz_i in self.embedding_size
-        )
-        # Prepare outputs
-        x_np = self._prepare_output(
+        # Init interpolation coefficients w
+        self._init_interpolation_coefficients(n_steps)
+        # Init outputs
+        x_np = self._init_output(
             (dtmg.n_x,), self.x_size, dtmg.get_x_dtype(numpy=True)
         )
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_0 = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
-        int_grad = self._prepare_output(
+        int_grad = self._init_output(
             (dtmg.n_x, dtmg.n_y_idx), self.ig_post_size
         )
+        # Define x repeat size
+        x_rep = dtmg.x_0_bsz * dtmg.y_idx_bsz
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="ig")
@@ -514,18 +515,13 @@ class IntegratedGradients(AbstractAttributionMethod):
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((x_rep,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
-            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps, w)
+            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
             # Record y_0 and y_r
             y_0[slc] += y_0_i
             y_r[slc] += y_r_i
@@ -623,7 +619,8 @@ class IntGradCorr(IntegratedGradients):
             Number of steps of the Riemann approximation of supporting
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1, :attr:`x_0_bsz` = :attr:`n_x_0`, and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -656,22 +653,19 @@ class IntGradCorr(IntegratedGradients):
         y_idx = dtmg.add_data(
             n_x, x_0, y_idx, n_steps, batch_size, x_seed, x_0_seed
         )
-        # Prepare interpolation coefficients w
-        w = tuple(
-            torch.linspace(
-                0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
-            )[(...,) + (None,) * (1 + len(sz_i))]
-            for sz_i in self.embedding_size
-        )
-        # Prepare outputs
+        # Init interpolation coefficients w
+        self._init_interpolation_coefficients(n_steps)
+        # Init outputs
         ig_error = 0.0
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        igc = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
-        igc_mean = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
+        igc = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        igc_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        # Define x repeat size
+        x_rep = dtmg.x_0_bsz * dtmg.y_idx_bsz
         # Iterate over x
         postfix = None
         if check_error:
@@ -703,18 +697,13 @@ class IntGradCorr(IntegratedGradients):
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((x_rep,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
-            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps, w)
+            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
             # Update y_r_mean and y_r_std
             y_r_delta = y_r_i - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
@@ -778,8 +767,9 @@ class IntGradCorr(IntegratedGradients):
         y_idx : None | int | ArrayLike
             Selected output component indices. If :obj:`None`, :obj:`y_idx` is
             resolved to all output component indices.
-        batch_size : int
-            Set :attr:`x_bsz`.
+        batch_size : None | int
+            - None : Set :attr:`x_bsz` = 1.
+            - int : Set :attr:`x_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
         n_x : None | int
@@ -799,7 +789,7 @@ class IntGradCorr(IntegratedGradients):
         # Init data manager
         dtmg = DataManager(self)
         y_idx = dtmg.add_data_iter_x(n_x, y_idx, batch_size, x_seed)
-        # Prepare outputs
+        # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)

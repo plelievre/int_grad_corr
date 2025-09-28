@@ -33,9 +33,10 @@ class _SeedGenerator:
 
 class DataManager:
     """
-    Help to setup the different dataloaders iterating over inputs :obj:`x`,
-    *true* outputs :obj:`y`, baselines :obj:`x_0`, and output component indices
-    :obj:`y_idx`.
+    Help to setup the appropriate dataloaders for each context.
+
+    Initialized dataloaders iterate over inputs :obj:`x`, *true* outputs
+    :obj:`y`, baselines :obj:`x_0`, or output component indices :obj:`y_idx`.
 
     Parameters
     ----------
@@ -52,7 +53,7 @@ class DataManager:
         Batch size of :attr:`x_dtld`.
     x_nb : int
         Number of batches of :attr:`x_dtld`.
-    x_dtld : torch.utils.data.DataLoader
+    x_dtld : torch.utils.data.DataLoader | tuple(ArrayLike)
         Dataloader iterating over inputs :obj:`x` (and *true* outputs :obj:`y`
         if :obj:`y_required`).
     n_x_0 : int
@@ -61,7 +62,7 @@ class DataManager:
         Batch size of :attr:`x_0_dtld`.
     x_0_nb : int
         Number of batches of :attr:`x_0_dtld`.
-    x_0_dtld : torch.utils.data.DataLoader
+    x_0_dtld : torch.utils.data.DataLoader | tuple(ArrayLike)
         Dataloader iterating over baselines :obj:`x_0`.
     n_y_idx : int
         Number of :obj:`y_idx` component indices.
@@ -69,33 +70,29 @@ class DataManager:
         Batch size of :attr:`y_idx_dtld`.
     y_idx_nb : int
         Number of batches of :attr:`y_idx_dtld`.
-    y_idx_dtld : torch.utils.data.DataLoader
+    y_idx_dtld : torch.utils.data.DataLoader | tuple(ArrayLike)
         Dataloader iterating over output component indices :obj:`y_idx`.
     """
 
     def __init__(self, attr, y_required=True):
         self.attr = attr
         self.y_required = y_required
-        self.bsz_checked = False
         # Init x attributes
-        self.x_checked = False
-        self.x_sampled = False
-        self.n_x = 1
-        self.x_bsz = 1
-        self.x_nb = 1
+        self.n_x = None
+        self.x_bsz = None
+        self.x_nb = None
         self.x_dtld = None
+        self.x_sampled = False
         # Init x_0 attributes
-        self.x_0_checked = False
-        self.n_x_0 = 1
-        self.x_0_bsz = 1
-        self.x_0_nb = 1
+        self.n_x_0 = None
+        self.x_0_bsz = None
+        self.x_0_nb = None
         self.x_0_dtld = None
         self.x_0_seed_rng = None
         # Init y_idx attributes
-        self.y_idx_checked = False
-        self.n_y_idx = 1
-        self.y_idx_bsz = 1
-        self.y_idx_nb = 1
+        self.n_y_idx = None
+        self.y_idx_bsz = None
+        self.y_idx_nb = None
         self.y_idx_dtld = None
 
     def get_x_dtype(self, numpy=False):
@@ -170,8 +167,6 @@ class DataManager:
             # Multi x
             if not self.attr.multi_x:
                 x = x[0]
-        # Update x status
-        self.x_checked = True
         return x
 
     @torch.no_grad()
@@ -225,8 +220,6 @@ class DataManager:
             # Multi x
             if not self.attr.multi_x:
                 x_0 = x_0[0]
-        # Update x_0 status
-        self.x_0_checked = True
         return x_0
 
     @torch.no_grad()
@@ -253,12 +246,15 @@ class DataManager:
         assert (
             torch.max(y_idx).item() < self.attr.y_size
         ), f"Maximum 'y_idx' is {self.attr.y_size - 1}."
-        # Update y_idx status
-        self.y_idx_checked = True
         return y_idx
 
     def _check_batchsizes(self, batch_size, use_x_0=True, use_y_idx=True):
-        # Init batch sizes
+        assert self.n_x is not None, "Check 'x' first."
+        if use_x_0:
+            assert self.n_x_0 is not None, "Check 'x_0' first."
+        if use_y_idx:
+            assert self.n_y_idx is not None, "Check 'y_idx' first."
+        # Expand tuple of batch sizes
         if isinstance(batch_size, tuple) and use_x_0 and use_y_idx:
             self.x_bsz, self.x_0_bsz, self.y_idx_bsz = batch_size
             batch_size = None
@@ -268,47 +264,65 @@ class DataManager:
         elif isinstance(batch_size, tuple):
             self.x_bsz = batch_size
             batch_size = None
+        # Fill batch sizes set to None:
+        if (batch_size is None) and (self.x_bsz is None):
+            self.x_bsz = 1
+        elif self.x_bsz is None:
+            self.x_bsz = self.n_x
+        if use_x_0 and (self.x_0_bsz is None):
+            self.x_0_bsz = self.n_x_0
+        if use_y_idx and (self.y_idx_bsz is None):
+            self.y_idx_bsz = self.n_y_idx
+        # Compute total batchsize if None
         if batch_size is None:
-            if self.x_bsz is None:
-                self.x_bsz = 1
-            if use_x_0 and (self.x_0_bsz is None):
-                self.x_0_bsz = self.n_x_0
-            if use_y_idx and (self.y_idx_bsz is None):
-                self.y_idx_bsz = self.n_y_idx
-            batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
+            batch_size = self.x_bsz
+            if use_x_0:
+                batch_size *= self.x_0_bsz
+            if use_y_idx:
+                batch_size *= self.y_idx_bsz
         batch_size = max(1, batch_size)
         # Compute y_idx_bsz and y_idx_nb
-        self.y_idx_bsz = min(self.n_y_idx, batch_size)
-        self.y_idx_nb = int(np.ceil(self.n_y_idx / self.y_idx_bsz))
-        batch_size = max(1, batch_size // self.y_idx_bsz)
+        if use_y_idx:
+            self.y_idx_bsz = min(self.n_y_idx, self.y_idx_bsz, batch_size)
+            self.y_idx_nb = int(np.ceil(self.n_y_idx / self.y_idx_bsz))
+            batch_size = max(1, batch_size // self.y_idx_bsz)
         # Compute x_0_bsz and x_0_nb
-        self.x_0_bsz = _greatest_divisor(self.n_x_0, batch_size)
-        self.x_0_nb = self.n_x_0 // self.x_0_bsz
-        batch_size = max(1, batch_size // self.x_0_bsz)
+        if use_x_0:
+            self.x_0_bsz = _greatest_divisor(
+                self.n_x_0, min(self.x_0_bsz, batch_size)
+            )
+            self.x_0_nb = self.n_x_0 // self.x_0_bsz
+            batch_size = max(1, batch_size // self.x_0_bsz)
         # Compute x_bsz and x_nb
         if self.x_sampled:
-            self.x_bsz = min(self.n_x // self.x_0_bsz, batch_size)
+            if use_x_0:
+                self.x_bsz = min(
+                    self.n_x // self.x_0_bsz, self.x_bsz, batch_size
+                )
+            else:
+                self.x_bsz = min(self.n_x, self.x_bsz, batch_size)
             n_x_dropped = self.n_x % self.x_bsz
             if n_x_dropped:
                 print(f"{n_x_dropped} 'x' samples dropped for efficiency.")
             self.x_nb = self.n_x // self.x_bsz
             self.n_x = self.x_bsz * self.x_nb
         else:
-            self.x_bsz = _greatest_divisor(self.n_x, batch_size)
+            self.x_bsz = _greatest_divisor(
+                self.n_x, min(self.x_bsz, batch_size)
+            )
             self.x_nb = self.n_x // self.x_bsz
         # Print actual batchsizes
-        batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
         if use_x_0 and use_y_idx:
+            batch_size = self.x_bsz * self.x_0_bsz * self.y_idx_bsz
             print(
                 f"batch size: {batch_size} ({self.x_bsz}, {self.x_0_bsz}, "
                 f"{self.y_idx_bsz})"
             )
         elif use_y_idx:
+            batch_size = self.x_bsz * self.y_idx_bsz
             print(f"batch size: {batch_size} ({self.x_bsz}, {self.y_idx_bsz})")
         else:
             print(f"batch size: {self.x_bsz}")
-        # Update batch sizes status
-        self.bsz_checked = True
         return self
 
     def _get_dataset_copy(self, seed):
@@ -319,8 +333,7 @@ class DataManager:
 
     @torch.no_grad()
     def _init_x_dtld(self, x, x_seed):
-        assert self.x_checked, "Check 'x' first."
-        assert self.bsz_checked, "Check batch sizes first."
+        assert self.x_bsz is not None, "Check batch sizes first."
         # x sampled from the dataset
         if x is None:
             shuffle, rng = False, None
@@ -355,8 +368,7 @@ class DataManager:
 
     @torch.no_grad()
     def _init_x_0_dtld(self, x_0, x_0_seed):
-        assert self.x_0_checked, "Check 'x_0' first."
-        assert self.bsz_checked, "Check batch sizes first."
+        assert self.x_0_bsz is not None, "Check batch sizes first."
         # Random baselines
         if x_0 is None:
             self.x_0_dtld = DataLoader(
@@ -385,20 +397,18 @@ class DataManager:
             )
         else:
             self.x_0_dtld = tuple(
-                (x_0[0][i * bsz : (i + 1) * bsz], None)
-                for i in range(self.x_0_nb)
+                (x_0[i * bsz : (i + 1) * bsz], None) for i in range(self.x_0_nb)
             )
         return self
 
     @torch.no_grad()
     def _init_y_idx_dtld(self, y_idx, n_steps=1, repeat=True):
         assert n_steps > 0, "The number of steps must be positive."
-        assert self.y_idx_checked, "Check 'y_idx' first."
-        assert self.bsz_checked, "Check batch sizes first."
+        assert self.y_idx_bsz is not None, "Check batch sizes first."
         x_x_0_bsz = 1
-        if repeat is True:
+        if (repeat is True) and (self.x_0_bsz is not None):
             x_x_0_bsz = self.x_bsz * self.x_0_bsz
-        elif repeat == "bsc":
+        elif (repeat is True) or (repeat == "bsc"):
             x_x_0_bsz = self.x_bsz
         # Fill y_idx with zeros to ensure even batchsizes
         n_fill = self.y_idx_nb * self.y_idx_bsz - self.n_y_idx
@@ -464,7 +474,8 @@ class DataManager:
             Number of steps of the Riemann approximation of supporting
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1, :attr:`x_0_bsz` = :attr:`n_x_0`, and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -501,7 +512,8 @@ class DataManager:
             - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
             - int : Select a specific output component index :obj:`y_idx`.
             - ArrayLike : Select multiple output component indices :obj:`y_idx`.
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1 and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -532,8 +544,9 @@ class DataManager:
         y_idx : None | int | ArrayLike
             Selected output component indices. If :obj:`None`, :obj:`y_idx` is
             resolved to all output component indices.
-        batch_size : int
-            Set :attr:`x_bsz`.
+        batch_size : None | int
+            - None : Set :attr:`x_bsz` = 1.
+            - int : Set :attr:`x_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
 
@@ -542,6 +555,9 @@ class DataManager:
         torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
+        assert (batch_size is None) or isinstance(
+            batch_size, int
+        ), ":obj:`batch_size` must be an integer."
         x = self._check_x(x)
         y_idx = self._check_y_idx(y_idx)
         self._check_batchsizes(batch_size, use_x_0=False, use_y_idx=False)
@@ -563,7 +579,8 @@ class DataManager:
             - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
             - int : Select a specific output component index :obj:`y_idx`.
             - ArrayLike : Select multiple output component indices :obj:`y_idx`.
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1 and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -607,8 +624,9 @@ class DataManager:
         n_iter : int
             Number of iterations, i.e. the number of random sequences of input
             component indices enabled one after the other.
-        x_0_batch_size : int
-            Set :attr:`x_0_bsz`.
+        x_0_batch_size : None | int
+            - None : Set :attr:`x_0_bsz` = :attr:`n_x_0`.
+            - int : Set :attr:`x_0_bsz`.
         x_seed : None | int
             Seed associated with :attr:`x_dtld`.
         x_0_seed : None | int
@@ -619,6 +637,9 @@ class DataManager:
         torch.Tensor
             Resolved :obj:`y_idx` if it was :obj:`None`.
         """
+        assert (x_0_batch_size is None) or isinstance(
+            x_0_batch_size, int
+        ), ":attr:`x_0_bsz` must be an integer."
         x = self._check_x(x)
         x_0 = self._check_x_0(x_0)
         y_idx = self._check_y_idx(y_idx)
@@ -865,7 +886,7 @@ class AbstractAttributionMethod:
         self.embedding_size = self._check_x_size(embedding_size)
         return self
 
-    def _prepare_output(self, size_prefix, size, dtype=None):
+    def _init_output(self, size_prefix, size, dtype=None):
         if dtype is None:
             dtype = (self.dtype_np,) * len(size)
         return tuple(

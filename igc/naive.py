@@ -94,7 +94,8 @@ class IntGradMeanStd(IntegratedGradients):
             Number of steps of the Riemann approximation of supporting
             Integrated Gradients (IG) (see
             :cite:`SundararajanAxiomaticAttributionDeep2017` for details).
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1, :attr:`x_0_bsz` = :attr:`n_x_0`, and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz`, :attr:`x_0_bsz`, and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -124,17 +125,14 @@ class IntGradMeanStd(IntegratedGradients):
         y_idx = dtmg.add_data(
             n_x, x_0, y_idx, n_steps, batch_size, x_seed, x_0_seed
         )
-        # Prepare interpolation coefficients w
-        w = tuple(
-            torch.linspace(
-                0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
-            )[(...,) + (None,) * (1 + len(sz_i))]
-            for sz_i in self.embedding_size
-        )
-        # Prepare outputs
+        # Init interpolation coefficients w
+        self._init_interpolation_coefficients(n_steps)
+        # Init outputs
         ig_error = 0.0
-        ig_mean = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
-        ig_std = self._prepare_output((dtmg.n_y_idx,), self.ig_post_size)
+        ig_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        ig_std = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        # Define x repeat size
+        x_rep = dtmg.x_0_bsz * dtmg.y_idx_bsz
         # Iterate over x
         postfix = None
         if check_error:
@@ -160,18 +158,13 @@ class IntGradMeanStd(IntegratedGradients):
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
-                    x_i_j.repeat(
-                        *(
-                            (dtmg.x_0_bsz * dtmg.y_idx_bsz,)
-                            + (1,) * (x_i_j.dim() - 1)
-                        )
-                    )
+                    x_i_j.repeat(*((x_rep,) + (1,) * (x_i_j.dim() - 1)))
                     for x_i_j in x_i
                 )
             # Update x_0_dtld seed
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
-            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps, w)
+            y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
             # Apply IG post-function
             ig_i = self._ig_post(ig_i, x_i_np)
             # Update IG mean and std
@@ -262,7 +255,8 @@ class NaiveCorrelation(AbstractAttributionMethod):
             - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
             - int : Select a specific output component index :obj:`y_idx`.
             - ArrayLike : Select multiple output component indices :obj:`y_idx`.
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1 and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -282,12 +276,12 @@ class NaiveCorrelation(AbstractAttributionMethod):
         # Init data manager
         dtmg = DataManager(self)
         y_idx = dtmg.add_data_naive(n_x, y_idx, batch_size, x_seed)
-        # Prepare outputs
+        # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        x_mean = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
-        corr = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_std = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        corr = self._init_output((dtmg.n_y_idx,), self.embedding_size)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="corr")
@@ -439,7 +433,8 @@ class NaiveTTest(AbstractAttributionMethod):
             - None : :attr:`y_idx_dtld` iterates over all output component indices :obj:`y_idx`.
             - int : Select a specific output component index :obj:`y_idx`.
             - ArrayLike : Select multiple output component indices :obj:`y_idx`.
-        batch_size : int | tuple(int)
+        batch_size : None | int | tuple(int)
+            - None : Set :attr:`x_bsz` = 1 and :attr:`y_idx_bsz` = :attr:`n_y_idx`.
             - int : Total batch size budget automatically distributed between :attr:`x_bsz` and :attr:`y_idx_bsz`.
             - tuple(int) : Set :attr:`x_bsz` and :attr:`y_idx_bsz` individually.
         x_seed : None | int
@@ -470,14 +465,14 @@ class NaiveTTest(AbstractAttributionMethod):
             cat_ranges, dtype=torch.float32, device=self.device
         )
         cat_ranges = cat_ranges.transpose(0, 1).unsqueeze(dim=1)
-        # Prepare outputs
+        # Init outputs
         n_x_a = np.zeros(dtmg.n_y_idx, dtype=np.int64)
-        x_mean_a = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std_a = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean_a = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_std_a = self._init_output((dtmg.n_y_idx,), self.embedding_size)
         n_x_b = np.zeros(dtmg.n_y_idx, dtype=np.int64)
-        x_mean_b = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std_b = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
-        ttest = self._prepare_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean_b = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_std_b = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        ttest = self._init_output((dtmg.n_y_idx,), self.embedding_size)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="ttest")
