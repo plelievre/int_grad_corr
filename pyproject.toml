@@ -1,6 +1,6 @@
 [project]
 name = "int-grad-corr"
-version = "1.0.0"
+version = "1.1.0"
 authors = [
     {name="Pierre Lelièvre", email="contact@plelievre.com"},
 ]
