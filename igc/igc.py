@@ -800,9 +800,9 @@ class IntGradCorr(IntegratedGradients):
         # Init outputs
         ig_error = 0.0
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_r_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         igc = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
         igc_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
@@ -826,12 +826,12 @@ class IntGradCorr(IntegratedGradients):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
-            # Update y_mean and y_std
+            # Update y_mean and y_var
             y_i_np = self._record_y(y_i, y_idx, dtmg.x_bsz)
             y_delta = y_i_np - y_mean
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
-            y_std += np.sum(y_delta * y_delta_2, axis=0)
+            y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Record original x
             x_i_np = (x_i_j.cpu().numpy() for x_i_j in x_i)
             # Prepare x
@@ -849,10 +849,10 @@ class IntGradCorr(IntegratedGradients):
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
             y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
-            # Update y_r_mean and y_r_std
+            # Update y_r_mean and y_r_var
             y_r_delta = y_r_i - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
-            y_r_std += np.sum(y_r_delta * (y_r_i - y_r_mean), axis=0)
+            y_r_var += np.sum(y_r_delta * (y_r_i - y_r_mean), axis=0)
             # Update correlation
             corr += np.sum(y_r_delta * y_delta_2, axis=0)
             # Apply IG post-function
@@ -878,20 +878,15 @@ class IntGradCorr(IntegratedGradients):
                 tqdm_iterator.set_postfix_str(
                     f"ig err: {ig_error:>9.6f}", refresh=False
                 )
-        # Finalize y_std and y_r_std
-        y_std /= dtmg.n_x
-        y_r_std /= dtmg.n_x
-        y_y_r_std = np.sqrt(y_std * y_r_std)
         # Finalize IGC
+        y_y_r_std = np.sqrt(y_var * y_r_var)
         for igc_i in igc:
-            igc_i /= dtmg.n_x
             igc_i /= y_y_r_std[(...,) + (None,) * (igc_i.ndim - 1)]
         # Check IGC error
         if check_error:
             igc_sum = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
             for igc_i in igc:
                 igc_sum += np.sum(np.reshape(igc_i, (dtmg.n_y_idx, -1)), axis=1)
-            corr /= dtmg.n_x
             corr /= y_y_r_std
             print(f"igc err: {np.mean(np.abs(igc_sum - corr)):>9.6f}")
         # Return results
@@ -936,9 +931,9 @@ class IntGradCorr(IntegratedGradients):
         y_idx = dtmg.add_data_iter_x(n_x, y_idx, batch_size, x_seed)
         # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_r_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
@@ -951,12 +946,12 @@ class IntGradCorr(IntegratedGradients):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
-            # Update y_mean and y_std
+            # Update y_mean and y_var
             y_i_np = self._record_y(y_i, y_idx, dtmg.x_bsz)
             y_delta = y_i_np - y_mean
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
-            y_std += np.sum(y_delta * y_delta_2, axis=0)
+            y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Send inputs to the device
             x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
             y_i = y_i.to(self.device)
@@ -966,20 +961,15 @@ class IntGradCorr(IntegratedGradients):
             y_r_i = self._fwd_no_grad(x_i)
             if self.use_z:
                 y_r_i = self._apply_final_lin_error(y_r_i)
-            # Update y_r_mean and y_r_std
+            # Update y_r_mean and y_r_var
             y_r_i_np = self._record_y(y_r_i, y_idx, dtmg.x_bsz)
             y_r_delta = y_r_i_np - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
-            y_r_std += np.sum(y_r_delta * (y_r_i_np - y_r_mean), axis=0)
+            y_r_var += np.sum(y_r_delta * (y_r_i_np - y_r_mean), axis=0)
             # Update correlation
             corr += np.sum(y_r_delta * y_delta_2, axis=0)
-        # Finalize y_std and y_r_std
-        y_std /= dtmg.n_x
-        y_r_std /= dtmg.n_x
-        y_y_r_std = np.sqrt(y_std * y_r_std)
         # Finalize correlation
-        corr /= dtmg.n_x
-        corr /= y_y_r_std
+        corr /= np.sqrt(y_var * y_r_var)
         # Multi x
         if not self.multi_x:
             igc = (igc,)

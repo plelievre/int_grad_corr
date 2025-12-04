@@ -281,9 +281,9 @@ class NaiveCorrelation(AbstractAttributionMethod):
         y_idx = dtmg.add_data_naive(n_x, y_idx, batch_size, x_seed)
         # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         x_mean = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_var = self._init_output((dtmg.n_y_idx,), self.embedding_size)
         corr = self._init_output((dtmg.n_y_idx,), self.embedding_size)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
@@ -296,18 +296,18 @@ class NaiveCorrelation(AbstractAttributionMethod):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
-            # Record y_mean and y_std
+            # Record y_mean and y_var
             y_i_np = self._record_y(y_i, y_idx, dtmg.x_bsz)
             y_delta = y_i_np - y_mean
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
-            y_std += np.sum(y_delta * y_delta_2, axis=0)
+            y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Send data to the device
             x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
             y_delta_2 = torch.as_tensor(y_delta_2, device=self.device)
             # Embed discrete inputs
             x_i = self._emb(x_i)
-            # Record x_mean and x_std
+            # Record x_mean and x_var
             x_i_delta = []
             for j, x_i_j in enumerate(x_i):
                 x_i_j_np = x_i_j.unsqueeze(dim=1).repeat(
@@ -317,7 +317,7 @@ class NaiveCorrelation(AbstractAttributionMethod):
                 x_i_j_delta = x_i_j_np - x_mean[j]
                 x_i_delta.append(x_i_j_delta)
                 x_mean[j][...] += np.sum(x_i_j_delta, axis=0) / n_x_count
-                x_std[j][...] += np.sum(
+                x_var[j][...] += np.sum(
                     x_i_j_delta * (x_i_j_np - x_mean[j]), axis=0
                 )
             # Prepare x_i_delta
@@ -357,16 +357,10 @@ class NaiveCorrelation(AbstractAttributionMethod):
                     corr[k][y_slc] += (
                         torch.sum(corr_i_j_k, dim=0)[:batch_size].cpu().numpy()
                     )
-        # Finalize x_std and y_std
-        for x_std_i in x_std:
-            x_std_i /= dtmg.n_x
-            x_std_i = np.sqrt(x_std_i)
-        y_std /= dtmg.n_x
-        y_std = np.sqrt(y_std)
-        # Compute correlation
-        for corr_i, x_std_i in zip(corr, x_std):
-            corr_i /= dtmg.n_x
-            corr_i /= x_std_i
+        # Finalize correlation
+        y_std = np.sqrt(y_var)
+        for corr_i, x_var_i in zip(corr, x_var):
+            corr_i /= np.sqrt(x_var_i)
             corr_i /= y_std[(...,) + (None,) * (corr_i.ndim - 1)]
         # Return results
         if self.multi_x:

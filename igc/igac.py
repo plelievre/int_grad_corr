@@ -169,7 +169,7 @@ class IntGradAutoCorr(IntegratedGradients):
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
             y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
-            # Update y_r_mean and y_r_std
+            # Update y_r_mean and y_r_var
             y_r_delta = y_r_i - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
             y_r_delta_2 = y_r_i - y_r_mean
@@ -198,11 +198,8 @@ class IntGradAutoCorr(IntegratedGradients):
                 tqdm_iterator.set_postfix_str(
                     f"ig err: {ig_error:>9.6f}", refresh=False
                 )
-        # Finalize y_r_var
-        y_r_var /= dtmg.n_x
         # Finalize IGaC
         for igac_i in igac:
-            igac_i /= dtmg.n_x
             igac_i /= y_r_var[(...,) + (None,) * (igac_i.ndim - 1)]
         # Check IGaC error
         if check_error:

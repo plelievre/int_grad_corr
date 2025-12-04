@@ -374,9 +374,9 @@ class BslShapCorr(BaselineShapley):
         # Init outputs
         bs_error = 0.0
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_r_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         bsc = np.zeros(
             (dtmg.n_y_idx,) + self.embedding_size[0], dtype=self.dtype_np
@@ -396,12 +396,12 @@ class BslShapCorr(BaselineShapley):
             # Break when x_nb is reached
             if i == dtmg.x_nb:
                 break
-            # Update y_mean and y_std
+            # Update y_mean and y_var
             y_i_np = self._record_y(y_i, y_idx, dtmg.x_bsz)
             y_delta = y_i_np - y_mean
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
-            y_std += np.sum(y_delta * y_delta_2, axis=0)
+            y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Prepare x
             # Send x to the device
             x_i = x_i.to(self.device)
@@ -415,10 +415,10 @@ class BslShapCorr(BaselineShapley):
             y_0_i, y_r_i, bs_i = self._bsl_shap_per_x(
                 dtmg, x_i, n_iter, x_0_seed
             )
-            # Update y_r_mean and y_r_std
+            # Update y_r_mean and y_r_var
             y_r_delta = y_r_i - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
-            y_r_std += np.sum(y_r_delta * (y_r_i - y_r_mean), axis=0)
+            y_r_var += np.sum(y_r_delta * (y_r_i - y_r_mean), axis=0)
             # Update correlation
             corr += np.sum(y_r_delta * y_delta_2, axis=0)
             # Update BSC
@@ -439,17 +439,12 @@ class BslShapCorr(BaselineShapley):
                 tqdm_iterator.set_postfix_str(
                     f"bs err: {bs_error:>9.6f}", refresh=False
                 )
-        # Finalize y_std and y_r_std
-        y_std /= dtmg.n_x
-        y_r_std /= dtmg.n_x
-        y_y_r_std = np.sqrt(y_std * y_r_std)
         # Finalize BSC
-        bsc /= dtmg.n_x
+        y_y_r_std = np.sqrt(y_var * y_r_var)
         bsc /= y_y_r_std[(...,) + (None,) * (bsc.ndim - 1)]
         # Check BSC error
         if check_error:
             bsc_sum = np.sum(np.reshape(bsc, (dtmg.n_y_idx, -1)), axis=1)
-            corr /= dtmg.n_x
             corr /= y_y_r_std
             print(f"bsc err: {np.mean(np.abs(bsc_sum - corr)):>9.6f}")
         # Return results
@@ -495,9 +490,9 @@ class BslShapCorr(BaselineShapley):
         y_idx = dtmg.add_data_iter_x(n_x, y_idx, batch_size, x_seed)
         # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        y_r_std = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
+        y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
@@ -507,32 +502,27 @@ class BslShapCorr(BaselineShapley):
             # Break when x_nb is reached
             if i == dtmg.x_nb:
                 break
-            # Update y_mean and y_std
+            # Update y_mean and y_var
             y_i_np = self._record_y(y_i, y_idx, dtmg.x_bsz)
             y_delta = y_i_np - y_mean
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
-            y_std += np.sum(y_delta * y_delta_2, axis=0)
+            y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Send x to the device
             x_i = x_i.to(self.device)
             # Embed discrete inputs
             x_i = self._emb((x_i,))
             # Compute predictions
             y_r_i = self._fwd_no_grad(x_i)
-            # Update y_r_mean and y_r_std
+            # Update y_r_mean and y_r_var
             y_r_i_np = self._record_y(y_r_i, y_idx, dtmg.x_bsz)
             y_r_delta = y_r_i_np - y_r_mean
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
-            y_r_std += np.sum(y_r_delta * (y_r_i_np - y_r_mean), axis=0)
+            y_r_var += np.sum(y_r_delta * (y_r_i_np - y_r_mean), axis=0)
             # Update correlation
             corr += np.sum(y_r_delta * y_delta_2, axis=0)
-        # Finalize y_std and y_r_std
-        y_std /= dtmg.n_x
-        y_r_std /= dtmg.n_x
-        y_y_r_std = np.sqrt(y_std * y_r_std)
         # Finalize correlation
-        corr /= dtmg.n_x
-        corr /= y_y_r_std
+        corr /= np.sqrt(y_var * y_r_var)
         # Check BSC error
         bsc_sum = np.sum(np.reshape(bsc, (dtmg.n_y_idx, -1)), axis=1)
         error = np.abs(bsc_sum - corr)
