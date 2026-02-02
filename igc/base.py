@@ -900,7 +900,7 @@ class AbstractAttributionMethod:
         if self.multi_x:
             x_dtype = tuple(x_i.dtype for x_i in x)
         else:
-            x_dtype = x.dtype
+            x_dtype = (x.dtype,)
         n_cat = 0
         for i, x_dtype_i in enumerate(x_dtype):
             if x_dtype_i in (torch.int16, torch.int32, torch.int64):
@@ -920,9 +920,7 @@ class AbstractAttributionMethod:
         else:
             x = (x.unsqueeze(dim=0).to(self.device),)
         x_emb = self._emb(x)
-        if isinstance(x_emb, (tuple, list)):
-            return tuple(x_emb_i.size()[1:] for x_emb_i in x_emb)
-        return (x_emb.size()[1:],)
+        return tuple(x_emb_i.size()[1:] for x_emb_i in x_emb)
 
     def _check_embedding_n_cat(self, embedding_n_cat):
         assert embedding_n_cat <= len(self.x_size), "Invalid 'embedding_n_cat'."
