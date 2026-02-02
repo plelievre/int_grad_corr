@@ -210,7 +210,7 @@ class IntegratedGradients(AbstractAttributionMethod):
     def __init__(
         self,
         module,
-        dataset=None,
+        dataset,
         dtld_kwargs=None,
         forward_method_name=None,
         forward_method_kwargs=None,
