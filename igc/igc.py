@@ -42,6 +42,10 @@ class Gradients(AbstractAttributionMethod):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -56,6 +60,12 @@ class Gradients(AbstractAttributionMethod):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def compute(  # pylint: disable=W0221
@@ -123,7 +133,7 @@ class Gradients(AbstractAttributionMethod):
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_k.to(self.device) for x_i_k in x_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
@@ -191,6 +201,10 @@ class IntegratedGradients(AbstractAttributionMethod):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -205,6 +219,12 @@ class IntegratedGradients(AbstractAttributionMethod):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def __init__(
@@ -349,14 +369,15 @@ class IntegratedGradients(AbstractAttributionMethod):
         over input dimensions using the `completeness` property of IG.
 
         .. warning::
-            IG postprocessing functions must have the following signature with
-            :obj:`ig_` and :obj:`ig_` being numpy.ndarray:
+            IG postprocessing functions must have the following signature:
 
             .. code-block:: python
 
                 def ig_post(ig_):
                     ig_modified = func(ig_)  # Do something on IG data
                     return ig_modified
+
+            with :obj:`ig_` and :obj:`ig_modified` being :obj:`numpy.ndarray`.
 
         Parameters
         ----------
@@ -513,7 +534,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             with torch.no_grad():
                 # Send x_0 to the device
                 x_0_i = tuple(x_0_i_j.to(self.device) for x_0_i_j in x_0_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_0_i = self._emb(x_0_i)
                 # Repeat x_0 along batch dimension
                 x_0_i = tuple(
@@ -643,7 +664,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
@@ -704,6 +725,10 @@ class IntGradCorr(IntegratedGradients):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -718,6 +743,12 @@ class IntGradCorr(IntegratedGradients):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def compute(  # pylint: disable=W0221,W0237
@@ -824,7 +855,7 @@ class IntGradCorr(IntegratedGradients):
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
@@ -939,7 +970,7 @@ class IntGradCorr(IntegratedGradients):
             # Send inputs to the device
             x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
             y_i = y_i.to(self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb(x_i)
             # Compute predictions
             y_r_i = self._fwd_no_grad(x_i)

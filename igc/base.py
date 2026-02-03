@@ -798,8 +798,8 @@ class AbstractAttributionMethod:
     .. note::
         Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
         the output shapes of attributions associated with these categorical
-        inputs. The number of embedding categories is added at the end of
-        original shapes.
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def __init__(

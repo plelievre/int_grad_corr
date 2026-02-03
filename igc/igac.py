@@ -45,6 +45,10 @@ class IntGradAutoCorr(IntegratedGradients):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -59,6 +63,12 @@ class IntGradAutoCorr(IntegratedGradients):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def compute(  # pylint: disable=W0221,W0237
@@ -130,8 +140,8 @@ class IntGradAutoCorr(IntegratedGradients):
         ig_error = 0.0
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        igac = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
-        igac_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        igac = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        igac_mean = self._init_output((dtmg.n_y_idx,), self.attr_size)
         # Define x repeat size
         if self.use_z:
             x_rep = dtmg.x_0_bsz * dtmg.z_idx_bsz
@@ -152,13 +162,11 @@ class IntGradAutoCorr(IntegratedGradients):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
-            # Record original x
-            x_i_np = (x_i_j.cpu().numpy() for x_i_j in x_i)
             # Prepare x
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
@@ -174,10 +182,8 @@ class IntGradAutoCorr(IntegratedGradients):
             y_r_mean += np.sum(y_r_delta, axis=0) / n_x_count
             y_r_delta_2 = y_r_i - y_r_mean
             y_r_var += np.sum(y_r_delta * y_r_delta_2, axis=0)
-            # Apply IG post-function
-            ig_i = self._ig_post(ig_i, x_i_np)
             # Update IGaC
-            for j, (ig_i_j, sz_j) in enumerate(zip(ig_i, self.ig_post_size)):
+            for j, (ig_i_j, sz_j) in enumerate(zip(ig_i, self.attr_size)):
                 igac_delta = ig_i_j - igac_mean[j]
                 igac_mean[j][...] += np.sum(igac_delta, axis=0) / n_x_count
                 igac[j][...] += np.sum(

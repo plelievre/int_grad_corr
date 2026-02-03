@@ -49,6 +49,10 @@ class IntGradMeanStd(IntegratedGradients):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -63,6 +67,12 @@ class IntGradMeanStd(IntegratedGradients):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     def compute(  # pylint: disable=W0221,W0237
@@ -129,8 +139,8 @@ class IntGradMeanStd(IntegratedGradients):
         self._init_interpolation_coefficients(n_steps)
         # Init outputs
         ig_error = 0.0
-        ig_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
-        ig_std = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        ig_mean = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        ig_std = self._init_output((dtmg.n_y_idx,), self.attr_size)
         # Define x repeat size
         if self.use_z:
             x_rep = dtmg.x_0_bsz * dtmg.z_idx_bsz
@@ -151,13 +161,11 @@ class IntGradMeanStd(IntegratedGradients):
             # Multi x
             if not self.multi_x:
                 x_i = (x_i,)
-            # Record original x
-            x_i_np = (x_i_j.cpu().numpy() for x_i_j in x_i)
             # Prepare x
             with torch.no_grad():
                 # Send x to the device
                 x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
-                # Embed discrete inputs
+                # Embed categorical inputs
                 x_i = self._emb(x_i)
                 # Repeat x along batch dimension
                 x_i = tuple(
@@ -168,8 +176,6 @@ class IntGradMeanStd(IntegratedGradients):
             dtmg.update_x_0_dtld_seed()
             # Compute integrated gradients
             y_0_i, y_r_i, ig_i = self._int_grad_per_x(dtmg, x_i, n_steps)
-            # Apply IG post-function
-            ig_i = self._ig_post(ig_i, x_i_np)
             # Update IG mean and std
             for j, ig_i_j in enumerate(ig_i):
                 ig_i_j_delta = ig_i_j - ig_mean[j]
@@ -229,6 +235,10 @@ class NaiveCorrelation(AbstractAttributionMethod):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -243,6 +253,12 @@ class NaiveCorrelation(AbstractAttributionMethod):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     @torch.no_grad()
@@ -282,9 +298,9 @@ class NaiveCorrelation(AbstractAttributionMethod):
         # Init outputs
         y_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        x_mean = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        x_var = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        corr = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        x_var = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        corr = self._init_output((dtmg.n_y_idx,), self.attr_size)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="corr")
@@ -305,7 +321,7 @@ class NaiveCorrelation(AbstractAttributionMethod):
             # Send data to the device
             x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
             y_delta_2 = torch.as_tensor(y_delta_2, device=self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb(x_i)
             # Record x_mean and x_var
             x_i_delta = []
@@ -342,7 +358,7 @@ class NaiveCorrelation(AbstractAttributionMethod):
                     index=y_idx_j.unsqueeze(dim=0).expand(dtmg.x_bsz, -1),
                 )
                 for k, (x_i_k_d, sz_k) in enumerate(
-                    zip(x_i_delta, self.embedding_size)
+                    zip(x_i_delta, self.attr_size)
                 ):
                     x_i_j_k_d = torch.gather(
                         x_i_k_d,
@@ -397,6 +413,10 @@ class NaiveTTest(AbstractAttributionMethod):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -411,6 +431,12 @@ class NaiveTTest(AbstractAttributionMethod):
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is appended to original
+        shapes.
     """
 
     @torch.no_grad()
@@ -464,12 +490,12 @@ class NaiveTTest(AbstractAttributionMethod):
         cat_ranges = cat_ranges.transpose(0, 1).unsqueeze(dim=1)
         # Init outputs
         n_x_a = np.zeros(dtmg.n_y_idx, dtype=np.int64)
-        x_mean_a = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std_a = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean_a = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        x_std_a = self._init_output((dtmg.n_y_idx,), self.attr_size)
         n_x_b = np.zeros(dtmg.n_y_idx, dtype=np.int64)
-        x_mean_b = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        x_std_b = self._init_output((dtmg.n_y_idx,), self.embedding_size)
-        ttest = self._init_output((dtmg.n_y_idx,), self.embedding_size)
+        x_mean_b = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        x_std_b = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        ttest = self._init_output((dtmg.n_y_idx,), self.attr_size)
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="ttest")
@@ -483,7 +509,7 @@ class NaiveTTest(AbstractAttributionMethod):
             # Send inputs to the device
             x_i = tuple(x_i_j.to(self.device) for x_i_j in x_i)
             y_i = y_i.to(self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb(x_i)
             # Iterate over output features y_idx
             for j, y_idx_j in enumerate(dtmg.y_idx_dtld):
@@ -542,7 +568,7 @@ class NaiveTTest(AbstractAttributionMethod):
             x_std_b_i = np.sqrt(x_std_b_i)
         # Compute t-test
         for i, (m_a_i, s_a_i, m_b_i, s_b_i, sz_i) in enumerate(
-            zip(x_mean_a, x_std_a, x_mean_b, x_std_b, self.embedding_size)
+            zip(x_mean_a, x_std_a, x_mean_b, x_std_b, self.attr_size)
         ):
             for j, (m_a_ij, s_a_ij, n_a_j, m_b_ij, s_b_ij, n_b_j) in enumerate(
                 zip(m_a_i, s_a_i, n_x_a, m_b_i, s_b_i, n_x_b)

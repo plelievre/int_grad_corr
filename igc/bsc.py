@@ -51,11 +51,24 @@ class BaselineShapley(AbstractAttributionMethod):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shape of attributions associated with this categorical
+        input. The number of embedding categories is added at the end of the
+        original shape.
     """
 
     @torch.no_grad()
@@ -127,7 +140,7 @@ class BaselineShapley(AbstractAttributionMethod):
         y_0 = np.zeros((dtmg.n_y_idx,), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_y_idx,), dtype=self.dtype_np)
         bsl_shap = np.zeros(
-            (dtmg.n_y_idx,) + self.embedding_size[0], dtype=self.dtype_np
+            (dtmg.n_y_idx,) + self.attr_size[0], dtype=self.dtype_np
         )
         # Iterate over y_idx
         for i, y_idx_i in enumerate(dtmg.y_idx_dtld):
@@ -218,8 +231,7 @@ class BaselineShapley(AbstractAttributionMethod):
         y_0 = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         bsl_shap = np.zeros(
-            (dtmg.n_x, dtmg.n_y_idx) + self.embedding_size[0],
-            dtype=self.dtype_np,
+            (dtmg.n_x, dtmg.n_y_idx) + self.attr_size[0], dtype=self.dtype_np
         )
         # Iterate over x
         for i, (x_i, y_i) in enumerate(
@@ -237,7 +249,7 @@ class BaselineShapley(AbstractAttributionMethod):
             # Prepare x
             # Send x to the device
             x_i = x_i.to(self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb((x_i,))[0]
             # Repeat x along batch dimension
             x_i = x_i.repeat(
@@ -293,11 +305,24 @@ class BslShapCorr(BaselineShapley):
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
     dtype_cat : torch.dtype
         Default data type of the categorical input tensors.
+
+    Notes
+    -----
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shape of attributions associated with this categorical
+        input. The number of embedding categories is added at the end of the
+        original shape.
     """
 
     @torch.no_grad()
@@ -378,11 +403,9 @@ class BslShapCorr(BaselineShapley):
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        bsc = np.zeros(
-            (dtmg.n_y_idx,) + self.embedding_size[0], dtype=self.dtype_np
-        )
+        bsc = np.zeros((dtmg.n_y_idx,) + self.attr_size[0], dtype=self.dtype_np)
         bsc_mean = np.zeros(
-            (dtmg.n_y_idx,) + self.embedding_size[0], dtype=self.dtype_np
+            (dtmg.n_y_idx,) + self.attr_size[0], dtype=self.dtype_np
         )
         # Iterate over x
         postfix = None
@@ -405,7 +428,7 @@ class BslShapCorr(BaselineShapley):
             # Prepare x
             # Send x to the device
             x_i = x_i.to(self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb((x_i,))[0]
             # Repeat x along batch dimension
             x_i = x_i.repeat(
@@ -426,7 +449,7 @@ class BslShapCorr(BaselineShapley):
             bsc_mean += np.sum(bsc_delta, axis=0) / n_x_count
             bsc += np.sum(
                 bsc_delta
-                * y_delta_2[(...,) + (None,) * len(self.embedding_size[0])],
+                * y_delta_2[(...,) + (None,) * len(self.attr_size[0])],
                 axis=0,
             )
             # Check IG error and display incremental value in tqdm
@@ -510,7 +533,7 @@ class BslShapCorr(BaselineShapley):
             y_var += np.sum(y_delta * y_delta_2, axis=0)
             # Send x to the device
             x_i = x_i.to(self.device)
-            # Embed discrete inputs
+            # Embed categorical inputs
             x_i = self._emb((x_i,))
             # Compute predictions
             y_r_i = self._fwd_no_grad(x_i)
