@@ -100,7 +100,7 @@ class Gradients(AbstractAttributionMethod):
         )
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
-        grad = self._init_output((dtmg.n_x, dtmg.n_y_idx), self.embedding_size)
+        grad = self._init_output((dtmg.n_x, dtmg.n_y_idx), self.attr_size)
         # Iterate over x #######################################################
         for i, (x_i, y_i) in enumerate(
             tqdm(dtmg.x_dtld, total=dtmg.x_nb, desc="grad")
@@ -214,6 +214,7 @@ class IntegratedGradients(AbstractAttributionMethod):
         dtld_kwargs=None,
         forward_method_name=None,
         forward_method_kwargs=None,
+        n_embedding_categories=None,
         dtype=torch.float32,
         dtype_cat=torch.int32,
     ):
@@ -223,6 +224,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             dtld_kwargs,
             forward_method_name,
             forward_method_kwargs,
+            n_embedding_categories,
             dtype,
             dtype_cat,
         )
@@ -232,24 +234,8 @@ class IntegratedGradients(AbstractAttributionMethod):
         self.z_size = None
         self.final_lin_weight = None
         self.final_lin_bias = None
+        self.emb_size = self.attr_size
         self.ig_post_func = None
-        self.ig_post_func_kwargs = {}
-        self.ig_post_size = self.embedding_size
-
-    def add_embedding_method(
-        self,
-        embedding_method_name,
-        embedding_method_kwargs=None,
-        embedding_n_cat=None,
-    ):
-        super().add_embedding_method(
-            embedding_method_name,
-            embedding_method_kwargs,
-            embedding_n_cat,
-        )
-        if self.ig_post_func is None:
-            self.ig_post_size = self.embedding_size
-        return self
 
     def _init_interpolation_coefficients(self, n_steps):
         assert n_steps > 0, "The number of steps must be positive."
@@ -257,7 +243,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             torch.linspace(
                 0.0, 1.0, n_steps, dtype=self.dtype, device=self.device
             )[(...,) + (None,) * (1 + len(sz_i))]
-            for sz_i in self.embedding_size
+            for sz_i in self.attr_size
         )
         return self
 
@@ -326,69 +312,79 @@ class IntegratedGradients(AbstractAttributionMethod):
             y += self.final_lin_bias[:, 0]
         return torch.as_tensor(y)
 
+    def _check_ig_post_function(self, ig_post_func):
+        if callable(ig_post_func):
+            ig_post_func = (ig_post_func,)
+        assert len(ig_post_func) == len(self.x_size), (
+            "'ig_post_func' must be a sequence of the same length as the "
+            "number of inputs."
+        )
+        for func in ig_post_func:
+            assert (func is None) or callable(
+                func
+            ), "'ig_post_func' must be a sequence of None or callable."
+        return ig_post_func
+
     @torch.no_grad()
-    def _get_ig_post_size_from_dtld(self):
+    def _update_attr_size_with_ig_post_func(self):
         x, _ = self.dataset[0]
         if self.multi_x:
             x = tuple(x_i.unsqueeze(dim=0).to(self.device) for x_i in x)
         else:
             x = (x.unsqueeze(dim=0).to(self.device),)
-        x_emb = self._emb(x)
-        ig_ = tuple(x_emb_i.unsqueeze(dim=1).cpu().numpy() for x_emb_i in x_emb)
-        x_ = tuple(x_i.cpu().numpy() for x_i in x)
-        ig_p = self._ig_post(ig_, x_)
-        if isinstance(ig_p, (tuple, list)):
-            return tuple(ig_p_i.shape[2:] for ig_p_i in ig_p)
-        return (ig_p.shape[2:],)
+        ig_post_size = []
+        for i, ig_i in enumerate(self._emb(x)):
+            ig_i = ig_i.unsqueeze(dim=1).cpu().numpy()
+            ig_post_size.append(self._ig_post(i, ig_i).shape)
+        self.attr_size = tuple(torch.Size(size[2:]) for size in ig_post_size)
+        return self
 
-    def add_ig_post_function(self, ig_post_func, ig_post_func_kwargs=None):
+    def add_ig_post_function(self, ig_post_func):
         """
         Add a function to postprocess individual IG attributions.
 
-        .. note::
-            Adding a function to postprocess individual IG modifies
-            the output shapes of computed attributions.
+        It may be useful to summarize attributions associated with
+        highly-dimensional inputs at an early stage to spare memory and
+        computing resources. This reduction can be safely conducted by addition
+        over input dimensions using the `completeness` property of IG.
 
         .. warning::
-            The IG postprocessing function must have the following signature:
+            IG postprocessing functions must have the following signature with
+            :obj:`ig_` and :obj:`ig_` being numpy.ndarray:
 
             .. code-block:: python
 
-                def ig_post(ig_x_1, ..., ig_x_n, x_1, ..., x_n, **kwargs)
-                    # Do something on IG data
-                    return ig_x_1, ..., ig_x_n
+                def ig_post(ig_):
+                    ig_modified = func(ig_)  # Do something on IG data
+                    return ig_modified
 
         Parameters
         ----------
-        ig_post_func : function
-            Function to postprocess individual IG attributions.
-        ig_post_func_kwargs : dict
-            Additional keyword arguments to the IG postprocessing function.
+        ig_post_func : None | function | tuple(None | function)
+            Function to postprocess individual IG attributions. When computing
+            attributions on models using multiple inputs, a sequence of
+            IG postprocessing functions is expected. If no IG postprocessing is
+            necessary for a specific input, :const:`None` can be used to bypass
+            this step.
 
         Returns
         -------
         self
         """
-        self.ig_post_func = ig_post_func
-        self.ig_post_func_kwargs = self._check_kwargs(ig_post_func_kwargs)
-        # Check ig_post_size
-        ig_post_size = self._get_ig_post_size_from_dtld()
-        self.ig_post_size = self._check_x_size(ig_post_size)
+        self.ig_post_func = self._check_ig_post_function(ig_post_func)
+        self._update_attr_size_with_ig_post_func()
         return self
 
-    def _ig_post(self, ig_x, x):
-        if self.ig_post_func is None:
-            return ig_x
-        # pylint: disable=E1102
-        return self.ig_post_func(*ig_x, *x, **self.ig_post_func_kwargs)
+    def _ig_post(self, i, ig_i):
+        if (self.ig_post_func is None) or (self.ig_post_func[i] is None):
+            return ig_i
+        return self.ig_post_func[i](ig_i)
 
     def _int_grad_per_x_per_x_0(self, dtmg, x, x_0, n_steps):
         # Init outputs
         y_0 = np.zeros((dtmg.n_y_idx, dtmg.x_bsz), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_y_idx, dtmg.x_bsz), dtype=self.dtype_np)
-        int_grad = self._init_output(
-            (dtmg.n_y_idx, dtmg.x_bsz), self.embedding_size
-        )
+        int_grad = self._init_output((dtmg.n_y_idx, dtmg.x_bsz), self.attr_size)
         # Generate inputs along a linear path between x_0 and x
         with torch.no_grad():
             x_s = tuple()
@@ -403,7 +399,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             .cpu()
             .numpy()
             .reshape((dtmg.y_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_i)
-            for x_i, x_0_i, sz_i in zip(x, x_0, self.embedding_size)
+            for x_i, x_0_i, sz_i in zip(x, x_0, self.emb_size)
         )
         # Forward pass
         y_f = self._fwd(x_s)
@@ -423,7 +419,7 @@ class IntegratedGradients(AbstractAttributionMethod):
                 grad_i_j.reshape(
                     (n_steps, dtmg.y_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_j
                 )[:, :batch_size]
-                for grad_i_j, sz_j in zip(grad_i, self.embedding_size)
+                for grad_i_j, sz_j in zip(grad_i, self.emb_size)
             )
             # Record y_0 and y_r, and sum over baselines
             y_0[y_slc] += y_r_i[0].sum(axis=1)
@@ -433,16 +429,14 @@ class IntegratedGradients(AbstractAttributionMethod):
                 int_grad_i_j = grad_i_j[:-1] + grad_i_j[1:]
                 int_grad_i_j = 0.5 * np.mean(int_grad_i_j, axis=0)
                 int_grad_i_j *= x_diff_j[:batch_size]
-                int_grad[j][y_slc] += int_grad_i_j.sum(axis=1)
+                int_grad[j][y_slc] += self._ig_post(j, int_grad_i_j.sum(axis=1))
         return y_0, y_r, int_grad
 
     def _int_grad_per_x_per_x_0_optim(self, dtmg, x, x_0, n_steps):
         # Init outputs
         z_0 = np.zeros((dtmg.n_z_idx, dtmg.x_bsz), dtype=self.dtype_np)
         z_r = np.zeros((dtmg.n_z_idx, dtmg.x_bsz), dtype=self.dtype_np)
-        int_grad = self._init_output(
-            (dtmg.n_z_idx, dtmg.x_bsz), self.embedding_size
-        )
+        int_grad = self._init_output((dtmg.n_z_idx, dtmg.x_bsz), self.attr_size)
         # Generate inputs along a linear path between x_0 and x
         with torch.no_grad():
             x_s = tuple()
@@ -457,7 +451,7 @@ class IntegratedGradients(AbstractAttributionMethod):
             .cpu()
             .numpy()
             .reshape((dtmg.z_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_i)
-            for x_i, x_0_i, sz_i in zip(x, x_0, self.embedding_size)
+            for x_i, x_0_i, sz_i in zip(x, x_0, self.emb_size)
         )
         # Forward pass
         z_f = self._fwd(x_s)
@@ -477,7 +471,7 @@ class IntegratedGradients(AbstractAttributionMethod):
                 grad_i_j.reshape(
                     (n_steps, dtmg.z_idx_bsz, dtmg.x_0_bsz, dtmg.x_bsz) + sz_j
                 )[:, :batch_size]
-                for grad_i_j, sz_j in zip(grad_i, self.embedding_size)
+                for grad_i_j, sz_j in zip(grad_i, self.emb_size)
             )
             # Record z_0 and z_r, and sum over baselines
             z_0[z_slc] += z_r_i[0].sum(axis=1)
@@ -487,7 +481,7 @@ class IntegratedGradients(AbstractAttributionMethod):
                 int_grad_i_j = grad_i_j[:-1] + grad_i_j[1:]
                 int_grad_i_j = 0.5 * np.mean(int_grad_i_j, axis=0)
                 int_grad_i_j *= x_diff_j[:batch_size]
-                int_grad[j][z_slc] += int_grad_i_j.sum(axis=1)
+                int_grad[j][z_slc] += self._ig_post(j, int_grad_i_j.sum(axis=1))
         # Apply final linear layer
         y_0 = self._apply_final_lin(z_0)
         y_r = self._apply_final_lin(z_r)
@@ -501,9 +495,7 @@ class IntegratedGradients(AbstractAttributionMethod):
         # Init outputs
         y_0 = np.zeros((dtmg.x_bsz, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.x_bsz, dtmg.n_y_idx), dtype=self.dtype_np)
-        int_grad = self._init_output(
-            (dtmg.x_bsz, dtmg.n_y_idx), self.embedding_size
-        )
+        int_grad = self._init_output((dtmg.x_bsz, dtmg.n_y_idx), self.attr_size)
         # Define x_0 repeat size
         if self.use_z:
             x_0_rep = dtmg.z_idx_bsz
@@ -623,9 +615,7 @@ class IntegratedGradients(AbstractAttributionMethod):
         y_np = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_0 = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
         y_r = np.zeros((dtmg.n_x, dtmg.n_y_idx), dtype=self.dtype_np)
-        int_grad = self._init_output(
-            (dtmg.n_x, dtmg.n_y_idx), self.ig_post_size
-        )
+        int_grad = self._init_output((dtmg.n_x, dtmg.n_y_idx), self.attr_size)
         # Define x repeat size
         if self.use_z:
             x_rep = dtmg.x_0_bsz * dtmg.z_idx_bsz
@@ -667,8 +657,6 @@ class IntegratedGradients(AbstractAttributionMethod):
             # Record y_0 and y_r
             y_0[slc] += y_0_i
             y_r[slc] += y_r_i
-            # Apply integrated gradients post-function
-            ig_i = self._ig_post(ig_i, tuple(x_np_i[slc] for x_np_i in x_np))
             # Record integrated gradients
             for j, ig_i_j in enumerate(ig_i):
                 int_grad[j][slc] += ig_i_j
@@ -804,8 +792,8 @@ class IntGradCorr(IntegratedGradients):
         y_r_mean = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         y_r_var = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
         corr = np.zeros(dtmg.n_y_idx, dtype=self.dtype_np)
-        igc = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
-        igc_mean = self._init_output((dtmg.n_y_idx,), self.ig_post_size)
+        igc = self._init_output((dtmg.n_y_idx,), self.attr_size)
+        igc_mean = self._init_output((dtmg.n_y_idx,), self.attr_size)
         # Define x repeat size
         if self.use_z:
             x_rep = dtmg.x_0_bsz * dtmg.z_idx_bsz
@@ -832,8 +820,6 @@ class IntGradCorr(IntegratedGradients):
             y_mean += np.sum(y_delta, axis=0) / n_x_count
             y_delta_2 = y_i_np - y_mean
             y_var += np.sum(y_delta * y_delta_2, axis=0)
-            # Record original x
-            x_i_np = (x_i_j.cpu().numpy() for x_i_j in x_i)
             # Prepare x
             with torch.no_grad():
                 # Send x to the device
@@ -855,10 +841,8 @@ class IntGradCorr(IntegratedGradients):
             y_r_var += np.sum(y_r_delta * (y_r_i - y_r_mean), axis=0)
             # Update correlation
             corr += np.sum(y_r_delta * y_delta_2, axis=0)
-            # Apply IG post-function
-            ig_i = self._ig_post(ig_i, x_i_np)
             # Update IGC
-            for j, (ig_i_j, sz_j) in enumerate(zip(ig_i, self.ig_post_size)):
+            for j, (ig_i_j, sz_j) in enumerate(zip(ig_i, self.attr_size)):
                 igc_delta = ig_i_j - igc_mean[j]
                 igc_mean[j][...] += np.sum(igc_delta, axis=0) / n_x_count
                 igc[j][...] += np.sum(

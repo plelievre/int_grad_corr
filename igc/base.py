@@ -14,6 +14,15 @@ from torch.utils.data import DataLoader
 # Data manager
 
 
+def _embedding_forward_wrapper(module, func):
+    def wrapper(input):  # pylint: disable=W0622
+        if torch.is_floating_point(input):
+            return torch.matmul(input, module.weight)
+        return func(input)
+
+    return wrapper
+
+
 def _greatest_divisor(a, b):
     c = min(a, b)
     for i in range(c):
@@ -124,16 +133,13 @@ class DataManager:
         tuple(dtype)
             Data types of all inputs :obj:`x`.
         """
+        non_emb_n = len(self.attr.x_size) - self.attr.embedding_n
         if numpy:
-            x_dtype = (self.attr.dtype_np,) * (
-                len(self.attr.x_size) - self.attr.embedding_n_cat
-            )
-            x_dtype += (self.attr.dtype_cat_np,) * self.attr.embedding_n_cat
+            x_dtype = (self.attr.dtype_np,) * non_emb_n
+            x_dtype += (self.attr.dtype_cat_np,) * self.attr.embedding_n
             return x_dtype
-        x_dtype = (self.attr.dtype,) * (
-            len(self.attr.x_size) - self.attr.embedding_n_cat
-        )
-        x_dtype += (self.attr.dtype_cat,) * self.attr.embedding_n_cat
+        x_dtype = (self.attr.dtype,) * non_emb_n
+        x_dtype += (self.attr.dtype_cat,) * self.attr.embedding_n
         return x_dtype
 
     @torch.no_grad()
@@ -331,7 +337,9 @@ class DataManager:
         if self.x_sampled:
             if use_x_0:
                 self.x_bsz = min(
-                    self.n_x // self.x_0_bsz, self.x_bsz, batch_size
+                    max(1, len(self.attr.dataset) // self.x_0_bsz),
+                    self.x_bsz,
+                    batch_size,
                 )
             else:
                 self.x_bsz = min(self.n_x, self.x_bsz, batch_size)
@@ -768,6 +776,10 @@ class AbstractAttributionMethod:
     forward_method_kwargs : dict
         Additional keyword arguments to the forward method of the
         :attr:`module`.
+    n_embedding_categories: None | int | tuple(int)
+        Enable the computation of attributions for categorical inputs associated
+        with :obj:`torch.nn.Embedding` layers, by providing the number of
+        embedding categories.
     dtype : torch.dtype
         Default data type of all intermediary tensors. It also defines the NumPy
         data type of the attribution results.
@@ -782,6 +794,12 @@ class AbstractAttributionMethod:
         x_2, and x_cat, with x_cat a categorical input, the dataset must return
         all inputs packed in a tuple, such as: (x_1, x_2, x_cat), y. Note that
         categorical inputs must be placed at the end of the tuple.
+
+    .. note::
+        Using categorical inputs with :obj:`torch.nn.Embedding` layers modifies
+        the output shapes of attributions associated with these categorical
+        inputs. The number of embedding categories is added at the end of
+        original shapes.
     """
 
     def __init__(
@@ -791,6 +809,7 @@ class AbstractAttributionMethod:
         dtld_kwargs=None,
         forward_method_name=None,
         forward_method_kwargs=None,
+        n_embedding_categories=None,
         dtype=torch.float32,
         dtype_cat=torch.int32,
     ):
@@ -803,11 +822,14 @@ class AbstractAttributionMethod:
             self._check_dtype(dtype, dtype_cat)
         )
         self.x_size, self.y_size, self.multi_x = self._get_x_y_sizes()
-        # Init embedding parameters
-        self.embedding_func = None
-        self.embedding_func_kwargs = {}
-        self.embedding_size = self.x_size
-        self.embedding_n_cat = 0
+        self.attr_size = self.x_size
+        # Embedding attributes
+        self.embedding_n = self._get_embedding_n_from_dtst()
+        self.embedding_mat = None
+        if self.embedding_n:
+            self._generate_embedding_mat(n_embedding_categories)
+            self._wrap_embedding_modules()
+            self._update_attr_size_with_embedding()
 
     def _check_module(self, module):
         # Check module
@@ -895,79 +917,58 @@ class AbstractAttributionMethod:
         return x_size, y_size, multi_x
 
     @torch.no_grad()
-    def _get_embedding_n_cat_from_dtst(self):
+    def _get_embedding_n_from_dtst(self):
         x, _ = self.dataset[0]
         if self.multi_x:
             x_dtype = tuple(x_i.dtype for x_i in x)
         else:
             x_dtype = (x.dtype,)
-        n_cat = 0
+        n = 0
         for i, x_dtype_i in enumerate(x_dtype):
             if x_dtype_i in (torch.int16, torch.int32, torch.int64):
-                n_cat += 1
+                n += 1
             else:
-                assert i < (len(x_dtype) - n_cat), (
+                assert i < (len(x_dtype) - n), (
                     "Categorical inputs must be placed at the end of the tuple "
                     "of inputs."
                 )
-        return n_cat
+        return n
 
-    @torch.no_grad()
-    def _get_embedding_size_from_dtst(self):
-        x, _ = self.dataset[0]
-        if self.multi_x:
-            x = tuple(x_i.unsqueeze(dim=0).to(self.device) for x_i in x)
-        else:
-            x = (x.unsqueeze(dim=0).to(self.device),)
-        x_emb = self._emb(x)
-        return tuple(x_emb_i.size()[1:] for x_emb_i in x_emb)
+    def _generate_embedding_mat(self, n_embedding_categories):
+        assert n_embedding_categories is not None, (
+            "'n_embedding_categories' must be defined when there are "
+            "categorical inputs."
+        )
+        if isinstance(n_embedding_categories, int):
+            n_embedding_categories = (n_embedding_categories,)
+        assert len(n_embedding_categories) == (
+            len(self.x_size) - self.embedding_n
+        ), (
+            "'n_embedding_categories' must be of the same length as the "
+            "number of categorical inputs."
+        )
+        self.embedding_mat = tuple(
+            torch.eye(n_cat, dtype=self.dtype, device=self.device)
+            for n_cat in n_embedding_categories
+        )
+        return self
 
-    def _check_embedding_n_cat(self, embedding_n_cat):
-        assert embedding_n_cat <= len(self.x_size), "Invalid 'embedding_n_cat'."
-        return embedding_n_cat
+    def _wrap_embedding_modules(self):
+        for m in self.module.modules():
+            if isinstance(m, nn.Embedding):
+                m.forward = _embedding_forward_wrapper(m, m.forward)
+        return self
 
-    def add_embedding_method(
-        self,
-        embedding_method_name,
-        embedding_method_kwargs=None,
-        embedding_n_cat=None,
-    ):
-        """
-        Add an embedding method to preprocess categorical inputs.
-
-        .. note::
-            Adding an embedding method modifies the output shapes of
-            attributions associated with categorical inputs.
-
-        .. warning::
-            The effect of this method must be excluded from the forward method
-            defined by :attr:`forward_method_name` at initialization.
-
-        Parameters
-        ----------
-        embedding_method_name : str
-            Name of the embedding method of the :attr:`module`.
-        embedding_method_kwargs : dict
-            Additional keyword arguments to the embedding method of the
-            :attr:`module`.
-        embedding_n_cat : int
-            Number of categorical inputs. If :const:`None`, this value is
-            inferred from the input data types (:obj:`torch.int16`,
-            :obj:`torch.int32`, :obj:`torch.int64`).
-
-        Returns
-        -------
-        self
-        """
-        self.embedding_func = getattr(self.module, embedding_method_name)
-        self.embedding_func_kwargs = self._check_kwargs(embedding_method_kwargs)
-        # Check embedding_n_cat
-        if embedding_n_cat is None:
-            embedding_n_cat = self._get_embedding_n_cat_from_dtst()
-        self.embedding_n_cat = self._check_embedding_n_cat(embedding_n_cat)
-        # Check embedding_size
-        embedding_size = self._get_embedding_size_from_dtst()
-        self.embedding_size = self._check_x_size(embedding_size)
+    def _update_attr_size_with_embedding(self):
+        attr_size = []
+        for i, size in enumerate(self.x_size):
+            if i < self.embedding_n:
+                attr_size.append(size)
+            else:
+                attr_size.append(
+                    size + (self.embedding_mat[self.embedding_n - i].size(0),)
+                )
+        self.attr_size = tuple(attr_size)
         return self
 
     def _init_output(self, size_prefix, size, dtype=None):
@@ -988,15 +989,15 @@ class AbstractAttributionMethod:
 
     @torch.no_grad()
     def _emb(self, x):
-        if self.embedding_func is None:
+        if not self.embedding_n:
             return x
-        # Apply embedding
-        x_emb = self.embedding_func(  # pylint: disable=E1102
-            *x[-self.embedding_n_cat :], **self.embedding_func_kwargs
-        )
-        if self.embedding_n_cat == 1:
-            x_emb = (x_emb,)
-        return x[: -self.embedding_n_cat] + x_emb
+        x_emb = []
+        for i, x_i in enumerate(x):
+            if i < self.embedding_n:
+                x_emb.append(x_i)
+            else:
+                x_emb.append(self.embedding_mat[self.embedding_n - i][x_i])
+        return tuple(x_emb)
 
     @torch.no_grad()
     def _fwd_no_grad(self, x):
