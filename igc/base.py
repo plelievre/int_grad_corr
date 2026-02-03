@@ -331,7 +331,9 @@ class DataManager:
         if self.x_sampled:
             if use_x_0:
                 self.x_bsz = min(
-                    self.n_x // self.x_0_bsz, self.x_bsz, batch_size
+                    max(1, len(self.attr.dataset) // self.x_0_bsz),
+                    self.x_bsz,
+                    batch_size,
                 )
             else:
                 self.x_bsz = min(self.n_x, self.x_bsz, batch_size)
