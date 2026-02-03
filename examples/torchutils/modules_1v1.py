@@ -215,6 +215,26 @@ class LinearBlock(nn.Module):
 # LinNeXt modules
 
 
+class LinNeXtStem(nn.Module):
+    """
+    Stem sub-block of LinNeXt module.
+    """
+
+    def __init__(self, in_features, out_features, norm_type="lna"):
+        super().__init__()
+        # Layers
+        layers = [nn.Linear(in_features, out_features, bias=True)]
+        layers.extend(_norm_layers_1d(norm_type, out_features))
+        self.stem = nn.Sequential(*layers)
+        # Weights initialization
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                init_linear(m, init_gain_act=0.02, init_bias="uniform")
+
+    def forward(self, x):
+        return self.stem(x)
+
+
 class LinNeXtBlock(nn.Module):
     """
     Sub-block of LinNeXt module.
@@ -251,12 +271,9 @@ class LinNeXtBlock(nn.Module):
         return result
 
 
-class LinNeXt(nn.Module):
+class LinNeXtMain(nn.Module):
     """
-    Block of linear layers inspired by the ConvNeXt architecture.
-
-    It incorporates activation functions, normalization layer, and a stochastic
-    depth dropout mechanism.
+    Main sub-block of LinNeXt module.
     """
 
     def __init__(
@@ -276,9 +293,11 @@ class LinNeXt(nn.Module):
         layers = []
         if isinstance(n_block_per_stage, int):
             n_block_per_stage = (n_block_per_stage,) * n_stage
-        n_blocks = 0
-        for i in n_block_per_stage:
-            n_blocks += i
+        elif isinstance(n_block_per_stage, (tuple, list)):
+            assert (
+                len(n_block_per_stage) == n_stage
+            ), f"n_block_per_stage requires {n_stage} values"
+        n_blocks = sum(n_block_per_stage)
         block_id = 0
         for size_in, size_out, n_block_per_stage_i in zip(
             lin_sizes[:-1], lin_sizes[1:], n_block_per_stage
@@ -307,6 +326,55 @@ class LinNeXt(nn.Module):
         for m in self.modules():
             if isinstance(m, nn.Linear):
                 init_linear(m, init_gain_act=0.02)
+
+    def forward(self, x):
+        return self.features(x)
+
+
+class LinNeXt(nn.Module):
+    """
+    Block of linear layers inspired by the ConvNeXt architecture.
+
+    It incorporates activation functions, normalization layer, and a stochastic
+    depth dropout mechanism.
+    """
+
+    def __init__(
+        self,
+        lin_sizes,
+        n_block_per_stage=3,
+        stochastic_depth_prob=0.0,
+        min_stochastic_depth_prob=0.0,
+        layer_scale=1e-6,
+        act_type="gelu",
+        norm_type="lna",
+        use_stem=True,
+        stem_dropout=0.0,
+    ):
+        super().__init__()
+        assert len(lin_sizes) >= 1, "lin_sizes requires at least 2 values."
+        # ConvNeXt blocks
+        layers = []
+        if use_stem:
+            if len(lin_sizes) == 2:
+                norm_type = None
+            layers.append(LinNeXtStem(lin_sizes[0], lin_sizes[1], norm_type))
+            lin_sizes = lin_sizes[1:]
+            if stem_dropout:
+                layers.append(nn.Dropout(stem_dropout))
+        if len(lin_sizes) > 1:
+            layers.append(
+                LinNeXtMain(
+                    lin_sizes,
+                    n_block_per_stage,
+                    stochastic_depth_prob,
+                    min_stochastic_depth_prob,
+                    layer_scale,
+                    act_type,
+                    norm_type,
+                )
+            )
+        self.features = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.features(x)
@@ -525,7 +593,7 @@ class ConvNeXtBlock(nn.Module):
 
 class ConvNeXtMain(nn.Module):
     """
-    Main sub-block of ConvNeX module.
+    Main sub-block of ConvNeXt module.
     """
 
     def __init__(
@@ -554,9 +622,11 @@ class ConvNeXtMain(nn.Module):
         layers = []
         if isinstance(n_block_per_stage, int):
             n_block_per_stage = (n_block_per_stage,) * self.n_stage
-        n_blocks = 0
-        for i in n_block_per_stage:
-            n_blocks += i
+        elif isinstance(n_block_per_stage, (tuple, list)):
+            assert (
+                len(n_block_per_stage) == self.n_stage
+            ), f"n_block_per_stage requires {self.n_stage} values"
+        n_blocks = sum(n_block_per_stage)
         block_id = 0
         for size_in, size_out, groups_i, n_block_per_stage_i in zip(
             conv_sizes[:-1], conv_sizes[1:], groups, n_block_per_stage
@@ -651,6 +721,8 @@ class ConvNeXt(nn.Module):
         # ConvNeXt blocks
         layers = []
         if stem_kernel_size is not None:
+            if len(conv_sizes) == 2:
+                norm_type = None
             layers.append(
                 ConvNeXtStem(
                     conv_sizes[0],
@@ -663,8 +735,8 @@ class ConvNeXt(nn.Module):
             )
             conv_sizes = conv_sizes[1:]
             groups = groups[1:]
-        if stem_dropout:
-            layers.append(nn.Dropout2d(stem_dropout))
+            if stem_dropout:
+                layers.append(nn.Dropout2d(stem_dropout))
         if len(conv_sizes) > 1:
             layers.append(
                 ConvNeXtMain(

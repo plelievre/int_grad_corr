@@ -3,6 +3,8 @@ Abstract model class easing checkpoint management and enforcing determinism.
 """
 
 import os
+import shutil
+import zipfile
 
 import numpy as np
 import torch
@@ -103,6 +105,67 @@ class _SeedGenerator:
         return int(self.rng.integers(self.high, size=1)[0])
 
 
+# Cleaning utilities
+
+
+def clean_saves(path):
+    for f in sorted(os.listdir(path)):
+        if f in (".DS_Store",):
+            continue
+        folder_name, ext = os.path.splitext(f)
+        folder_path = os.path.join(path, folder_name)
+        # Unzip folders
+        if ext == ".zip":
+            zip_path = os.path.join(path, f)
+            with zipfile.ZipFile(zip_path) as zip_file:
+                clean = zip_file.comment == b"clean"
+                if not clean:
+                    zip_file.extractall(path)
+            if clean:
+                continue
+        else:
+            zip_path = folder_path + ".zip"
+            if os.path.isfile(zip_path):
+                continue
+        # Find the best epoch
+        print(f"Processing: {folder_name}")
+        if not os.path.isdir(folder_path):
+            continue
+        best_ckp_path, best_ckp_archive_path = None, None
+        best_ckp_acc = 1e9
+        for f_sub in sorted(os.listdir(folder_path)):
+            checkpoint_path = os.path.join(folder_path, f_sub)
+            if not os.path.isfile(checkpoint_path):
+                continue
+            f_split = f_sub.split("-")
+            if f_split[0] != "checkpoint":
+                continue
+            accuracy = torch.load(
+                checkpoint_path,
+                map_location=torch.device("cpu"),
+                weights_only=True,
+            )["val_acc"]
+            if accuracy < best_ckp_acc:
+                best_ckp_path = os.path.join(folder_path, f_sub)
+                best_ckp_archive_path = os.path.join(folder_name, f_sub)
+                best_ckp_acc = accuracy
+        # Make clean archive
+        if best_ckp_path is None:
+            print("    Error")
+            continue
+        if os.path.isfile(zip_path):
+            os.remove(zip_path)
+        with zipfile.ZipFile(zip_path, "w") as zip_file:
+            zip_file.write(best_ckp_path, best_ckp_archive_path)
+            zip_file.comment = b"clean"
+        if os.path.isdir(folder_path):
+            shutil.rmtree(folder_path)
+    # Cleanup macos unzip clutter
+    macos_clutter = os.path.join(path, "__MACOSX")
+    if os.path.isdir(macos_clutter):
+        shutil.rmtree(macos_clutter)
+
+
 # Abstract model
 
 
@@ -191,6 +254,17 @@ class AbstractModel:
         self.network = None
         # Optimizer & scheduler : optional #####################################
         self.optimizer, self.scheduler = None, None
+
+    def __del__(self):
+        if os.path.isdir(self.logs_path):
+            if not os.listdir(self.logs_path):
+                os.rmdir(self.logs_path)
+        if os.path.isdir(self.saves_path):
+            if not os.listdir(self.saves_path):
+                os.rmdir(self.saves_path)
+        if os.path.isdir(self.results_path):
+            if not os.listdir(self.results_path):
+                os.rmdir(self.results_path)
 
     def _init_paths(self):
         logs_path = os.path.join(self.project_path, "logs")
