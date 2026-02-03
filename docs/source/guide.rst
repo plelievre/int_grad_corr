@@ -126,8 +126,7 @@ Compute IGC attributions
        n_x=None,                 # and 'x' sampled over the whole dataset
    )
 
-   print()
-   print(igc)
+   print("\n", igc, sep='')
 
 .. code-block:: pycon
    :caption: >>>
